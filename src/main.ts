@@ -445,7 +445,12 @@ async function start(): Promise<void> {
 
   latest = await snapshot()
   paint()
-  latest = await refresh()
+
+  try {
+    latest = await refresh()
+  } catch (error) {
+    latest = { running: [], todaySeconds: 0, problem: describeProblem(error) }
+  }
   paint()
 
   if (latest.problem !== null) {

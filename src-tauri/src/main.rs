@@ -13,6 +13,7 @@ use chrono::Utc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::time::{interval, MissedTickBehavior};
 
+use panel::TrayAnchor;
 use state::AppState;
 
 const TICK: Duration = Duration::from_secs(1);
@@ -21,8 +22,11 @@ const SNAPSHOT_EVENT: &str = "bita://snapshot";
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            panel::toggle(app);
+        }))
         .manage(AppState::new())
+        .manage(TrayAnchor::default())
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
             commands::refresh,
@@ -39,7 +43,8 @@ fn main() {
             commands::set_scope,
             commands::unset_scope,
             commands::doctor_report,
-            commands::install_cli
+            commands::install_cli,
+            commands::quit
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);

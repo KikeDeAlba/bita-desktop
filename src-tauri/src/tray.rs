@@ -1,15 +1,16 @@
 use tauri::{
     image::Image,
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle,
+    AppHandle, Manager,
 };
 
 use crate::model::LiveTimer;
-use crate::panel;
+use crate::panel::{self, Anchor, TrayAnchor};
 
 pub const ID: &str = "bita";
 
+const OPEN: &str = "open";
 const QUIT: &str = "quit";
 
 const TEMPLATE_ICON: &[u8] = include_bytes!("../icons/trayTemplate@2x.png");
@@ -19,34 +20,60 @@ const MAX_LABEL_CHARS: usize = 12;
 const UNNAMED: &str = "sin nombre";
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let quit = MenuItem::with_id(app, QUIT, "Salir de bita", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&quit])?;
+    let open = MenuItem::with_id(app, OPEN, "Abrir bita", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT, "Salir de bita", true, Some("Cmd+Q"))?;
+    let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
 
     TrayIconBuilder::with_id(ID)
         .icon(Image::from_bytes(TEMPLATE_ICON)?)
         .icon_as_template(true)
-        .tooltip("bita")
+        .tooltip("bita — clic para abrir, clic derecho para salir")
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .on_menu_event(|app, event| {
-            if event.id() == QUIT {
-                app.exit(0);
-            }
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            QUIT => app.exit(0),
+            OPEN => panel::toggle(app),
+            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
+            let app = tray.app_handle();
+            remember(app, &event);
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                panel::toggle(tray.app_handle());
+                panel::toggle(app);
             }
         })
         .build(app)?;
 
     Ok(())
+}
+
+fn remember(app: &AppHandle, event: &TrayIconEvent) {
+    let rect = match event {
+        TrayIconEvent::Click { rect, .. }
+        | TrayIconEvent::DoubleClick { rect, .. }
+        | TrayIconEvent::Enter { rect, .. }
+        | TrayIconEvent::Move { rect, .. }
+        | TrayIconEvent::Leave { rect, .. } => rect,
+        _ => return,
+    };
+
+    let scale = app
+        .get_webview_window(panel::LABEL)
+        .and_then(|window| window.scale_factor().ok())
+        .unwrap_or(1.0);
+
+    let position = rect.position.to_physical::<f64>(scale);
+    let size = rect.size.to_physical::<f64>(scale);
+
+    app.state::<TrayAnchor>().remember(Anchor {
+        center_x: position.x + size.width / 2.0,
+        bottom_y: position.y + size.height,
+    });
 }
 
 pub fn set_title(app: &AppHandle, title: &str) {
@@ -104,7 +131,13 @@ mod tests {
     use super::{format_clock, format_title, truncate};
     use crate::model::LiveTimer;
 
-    fn timer(id: i64, started_at: &str, elapsed: i64, project: Option<&str>, draft: bool) -> LiveTimer {
+    fn timer(
+        id: i64,
+        started_at: &str,
+        elapsed: i64,
+        project: Option<&str>,
+        draft: bool,
+    ) -> LiveTimer {
         LiveTimer {
             id,
             title: if draft { None } else { Some("Algo".into()) },
@@ -151,7 +184,13 @@ mod tests {
 
     #[test]
     fn a_long_project_name_is_cut_so_the_menu_bar_stays_put() {
-        let running = vec![timer(1, "2026-09-20T05:00:00Z", 60, Some("Plataforma de Reservas"), false)];
+        let running = vec![timer(
+            1,
+            "2026-09-20T05:00:00Z",
+            60,
+            Some("Plataforma de Reservas"),
+            false,
+        )];
         assert_eq!(format_title(&running), "0:01 Plataforma\u{2026}");
     }
 

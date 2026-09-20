@@ -1,4 +1,4 @@
-import { describeProblem, installCli, type Check, type Report } from './bita.ts'
+import { describeProblem, installCli, quit, type Check, type Report } from './bita.ts'
 import { element } from './dom.ts'
 
 const MARKS: Record<Check['health'], string> = {
@@ -84,4 +84,16 @@ export function renderSettings(
   close.type = 'button'
   close.addEventListener('click', onDone)
   view.append(close)
+
+  const leave = element('div', 'leave')
+  leave.append(
+    element('p', 'leave-note', 'bita vive en la barra: no tiene ventana ni icono en el Dock.'),
+  )
+  const stop = element('button', 'danger-button wide', 'Salir de bita') as HTMLButtonElement
+  stop.type = 'button'
+  stop.addEventListener('click', () => {
+    void quit()
+  })
+  leave.append(stop)
+  view.append(leave)
 }
