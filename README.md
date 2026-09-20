@@ -90,8 +90,16 @@ Dos cosas del dominio que la interfaz intenta hacer evidentes:
 ```sh
 pnpm tauri dev      # la app, con recarga del panel
 pnpm typecheck      # el frontend
+pnpm measure        # mide el panel en WebKit y falla si algo se sale
 cargo test          # desde src-tauri/
 ```
+
+`pnpm measure` existe porque un panel roto se veía igual de bien en el código
+que en la revisión: `.bar` estaba declarada dos veces —la cabecera y la barra de
+estimación de los grupos— y la segunda aplastaba la cabecera de 44 px a 4,
+dejando el título medio fuera. Carga el `dist` en un WKWebView de 380x520, mide
+las cajas y sale con error si alguna empieza por encima del panel o no mide lo
+que debe.
 
 **Nunca contra la base real.** `BITA_DB_PATH` apunta la app a una copia:
 

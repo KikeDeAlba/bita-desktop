@@ -706,19 +706,19 @@ input {
   color: var(--fg-mute);
 }
 
-.bar {
+.meter {
   width: 100%;
   height: 4px;
 }
 
-.bar-track {
+.meter-track {
   height: 4px;
   border-radius: 2px;
   background: var(--elev);
   overflow: hidden;
 }
 
-.bar-fill {
+.meter-fill {
   height: 4px;
   background: var(--fg-faint);
 }
