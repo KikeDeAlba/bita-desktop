@@ -1,5 +1,36 @@
+@font-face {
+  font-family: 'Instrument Sans';
+  src: url('./fonts/instrument-sans-var.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./fonts/ibm-plex-mono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./fonts/ibm-plex-mono-500.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./fonts/ibm-plex-mono-600.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: block;
+}
+
 :root {
-  --bg-page: #1d2021;
   --bg: #32302f;
   --inset: #282828;
   --card: #3c3836;
@@ -49,6 +80,20 @@ body {
   cursor: default;
 }
 
+button {
+  font-family: inherit;
+  cursor: default;
+  border: none;
+  background: none;
+  color: inherit;
+  padding: 0;
+}
+
+input {
+  font-family: inherit;
+  user-select: text;
+}
+
 #panel {
   height: 100%;
   display: flex;
@@ -59,12 +104,100 @@ body {
   overflow: hidden;
 }
 
-button {
-  font-family: inherit;
-  cursor: default;
+.bar {
+  flex-shrink: 0;
+  height: 44px;
+  padding: 0 12px 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
 }
 
-input {
-  font-family: inherit;
-  user-select: text;
+.bar-mark {
+  display: inline-flex;
+  color: var(--running);
+}
+
+.bar-mark[data-idle='true'] {
+  color: var(--fg-faint);
+}
+
+.bar-wordmark {
+  flex-grow: 1;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: -0.1px;
+}
+
+.bar-label {
+  font-size: 11.5px;
+  color: var(--fg-mute);
+}
+
+.bar-total {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--fg-mute);
+}
+
+.icon-button:hover {
+  background: var(--card);
+  color: var(--fg);
+}
+
+.tabs {
+  flex-shrink: 0;
+  margin: 9px 12px 3px 12px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 2px;
+  padding: 3px;
+  background: var(--inset);
+  border-radius: 8px;
+}
+
+.tabs button {
+  padding: 6px 0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-mute);
+}
+
+.tabs button:hover {
+  color: var(--fg-dim);
+}
+
+.tabs button[aria-selected='true'] {
+  background: var(--elev);
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.view {
+  flex-grow: 1;
+  overflow: hidden auto;
+  padding: 10px 12px 12px 12px;
+}
+
+.placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--fg-faint);
+  font-size: 12px;
 }
