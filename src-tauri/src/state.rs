@@ -143,6 +143,10 @@ impl AppState {
         inner.problem = None;
     }
 
+    pub fn forget_cli(&self) {
+        *self.cli.lock().expect("state poisoned") = None;
+    }
+
     pub async fn require_cli(&self, app: &AppHandle) -> Result<Cli, Problem> {
         self.ensure_cli(app).await
     }

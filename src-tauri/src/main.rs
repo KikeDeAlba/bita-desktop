@@ -1,5 +1,6 @@
 mod cli;
 mod commands;
+mod doctor;
 mod model;
 mod panel;
 mod state;
@@ -36,7 +37,9 @@ fn main() {
             commands::scopes,
             commands::add_project,
             commands::set_scope,
-            commands::unset_scope
+            commands::unset_scope,
+            commands::doctor_report,
+            commands::install_cli
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);

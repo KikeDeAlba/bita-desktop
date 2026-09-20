@@ -46,11 +46,14 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.0",
+      "signingIdentity": "-"
     },
     "resources": {
       "../vendor/bita/src": "bita/src",
       "../vendor/bita/scripts": "bita/scripts",
+      "../vendor/bita/commands": "bita/commands",
+      "../vendor/bita/skill": "bita/skill",
       "../vendor/bita/package.json": "bita/package.json"
     }
   }
