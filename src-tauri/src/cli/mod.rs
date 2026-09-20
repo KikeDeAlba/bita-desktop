@@ -16,6 +16,8 @@ use crate::model::{CliError, Envelope, Problem, ProblemKind, SUPPORTED_SCHEMA};
 
 const CLI_OVERRIDE_ENV: &str = "BITA_CLI";
 const DB_OVERRIDE_ENV: &str = "BITA_DB_PATH";
+const DOCS_OVERRIDE_ENV: &str = "BITA_DOCS_DIR";
+const EDITOR_OVERRIDE_ENV: &str = "BITA_EDITOR";
 const BUNDLED_ENTRY: &str = "bita/src/bin/bita.ts";
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -93,6 +95,21 @@ impl Cli {
         })
     }
 
+    pub async fn call_slow<T: DeserializeOwned>(
+        &self,
+        args: &[&str],
+        limit: Duration,
+    ) -> Result<(T, serde_json::Value), Problem> {
+        let (data, meta) = self.envelope_with_meta_within::<T>(args, limit).await?;
+        let data = data.ok_or_else(|| {
+            Problem::new(
+                ProblemKind::Unreadable,
+                "La respuesta del CLI venía sin datos.",
+            )
+        })?;
+        Ok((data, meta))
+    }
+
     pub async fn run(&self, args: &[&str]) -> Result<(), Problem> {
         self.envelope::<serde_json::Value>(args).await.map(|_| ())
     }
@@ -119,6 +136,14 @@ impl Cli {
         &self,
         args: &[&str],
     ) -> Result<(Option<T>, serde_json::Value), Problem> {
+        self.envelope_with_meta_within::<T>(args, CALL_TIMEOUT).await
+    }
+
+    async fn envelope_with_meta_within<T: DeserializeOwned>(
+        &self,
+        args: &[&str],
+        limit: Duration,
+    ) -> Result<(Option<T>, serde_json::Value), Problem> {
         let mut command = Command::new(&self.node);
         command
             .arg(&self.entry)
@@ -134,16 +159,20 @@ impl Cli {
             .stdin(Stdio::null())
             .kill_on_drop(true);
 
+        if let Some(docs) = env::var_os(DOCS_OVERRIDE_ENV) {
+            command.arg("--docs-dir").arg(docs);
+        }
+
         if let Some(home) = env::var_os("HOME") {
             command.env("HOME", home);
         }
 
-        let output = timeout(CALL_TIMEOUT, command.output())
+        let output = timeout(limit, command.output())
             .await
             .map_err(|_| {
                 Problem::new(
                     ProblemKind::CliFailed,
-                    format!("El CLI no respondió en {} s.", CALL_TIMEOUT.as_secs()),
+                    format!("El CLI no respondió en {} s.", limit.as_secs()),
                 )
             })?
             .map_err(|error| {
@@ -246,6 +275,22 @@ fn bin_directories() -> Vec<PathBuf> {
 
 fn canonical(path: PathBuf) -> PathBuf {
     fs::canonicalize(&path).unwrap_or(path)
+}
+
+pub fn docs_root() -> PathBuf {
+    if let Some(explicit) = env::var_os(DOCS_OVERRIDE_ENV) {
+        return PathBuf::from(explicit);
+    }
+
+    let database = database_path();
+    match database.parent() {
+        Some(parent) => parent.join("docs"),
+        None => PathBuf::from("/tmp").join("docs"),
+    }
+}
+
+pub fn editor_override() -> Option<OsString> {
+    env::var_os(EDITOR_OVERRIDE_ENV)
 }
 
 pub fn database_path() -> PathBuf {

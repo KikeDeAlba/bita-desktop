@@ -4,7 +4,9 @@ mod doctor;
 mod menu;
 mod model;
 mod notes;
+mod notes_cmd;
 mod panel;
+mod pasteboard;
 mod screen;
 mod state;
 mod tray;
@@ -50,6 +52,15 @@ fn main() {
             commands::install_cli,
             commands::open_notes,
             commands::notes_take_focus,
+            notes_cmd::notes_tree,
+            notes_cmd::notes_list,
+            notes_cmd::notes_today,
+            notes_cmd::notes_document,
+            notes_cmd::notes_search,
+            notes_cmd::notes_migrate,
+            notes_cmd::open_document,
+            notes_cmd::open_external,
+            notes_cmd::copy_text,
             commands::quit
         ])
         .setup(|app| {
@@ -58,8 +69,12 @@ fn main() {
             tray::create(app.handle())?;
             panel::wire(app.handle());
             watch::spawn(app.handle().clone(), cli::database_path());
+            watch::spawn_docs(app.handle().clone(), cli::docs_root());
             spawn_refresh(app.handle().clone());
             spawn_tick(app.handle().clone());
+            if notes::opens_on_start() {
+                notes::open(app.handle(), None)?;
+            }
             Ok(())
         })
         .run(tauri::generate_context!())

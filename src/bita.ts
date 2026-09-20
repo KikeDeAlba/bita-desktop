@@ -21,6 +21,10 @@ export interface Problem {
 export interface LiveTimer {
   id: number
   title: string | null
+  docRelPath: string | null
+  sectionsWritten: number | null
+  sectionsTotal: number | null
+  touchedSinceNote: number | null
   projectName: string | null
   projectId: number | null
   startedAt: string
@@ -173,6 +177,224 @@ export function openNotes(entryId: number | null): Promise<void> {
 
 export function notesTakeFocus(): Promise<number | null> {
   return invoke<number | null>('notes_take_focus')
+}
+
+export type SectionState = 'written' | 'empty' | 'absent'
+
+export interface DocSection {
+  heading: string
+  state: SectionState
+  canonical: boolean
+}
+
+export type DocFileStatus = 'ok' | 'changed' | 'missing' | 'unverified'
+
+export interface DocFile {
+  status: DocFileStatus
+  path: string
+  checksum: string | null
+  recordedChecksum: string
+  byteSize: number | null
+  recordedByteSize: number
+  mtime: string | null
+}
+
+export interface DocSummary {
+  relPath: string
+  path: string
+  docTitle: string
+  kind: string
+  source: string
+  sectionCount: number
+  byteSize: number
+  createdAt: string
+  recordedAt: string
+  repoSlug: string | null
+  branch: string | null
+  headSha: string | null
+  appendixCount: number
+  sections: DocSection[] | null
+  file: DocFile
+}
+
+export interface NoteRow {
+  entryId: number
+  projectId: number | null
+  projectName: string | null
+  projectSlug: string
+  title: string
+  localDay: string
+  month: string
+  startLocal: string
+  durationSeconds: number
+  durationHuman: string
+  running: boolean
+  registered: boolean
+  issueKey: string | null
+  doc: DocSummary | null
+}
+
+export interface DocDetail extends DocSummary {
+  frontMatter: Record<string, string>
+  frontMatterValid: boolean
+  preamble: string
+  markdown: string | null
+}
+
+export interface NoteAppendix {
+  relPath: string
+  path: string
+  title: string
+  sectionCount: number
+  byteSize: number
+}
+
+export interface NoteDocument extends Omit<NoteRow, 'doc'> {
+  doc: DocDetail | null
+  appendices: NoteAppendix[]
+}
+
+export interface TreeMonth {
+  month: string
+  entryCount: number
+  docCount: number
+}
+
+export interface TreeProject {
+  projectId: number | null
+  projectName: string | null
+  projectSlug: string
+  active: boolean
+  entryCount: number
+  docCount: number
+  appendixCount: number
+  firstDay: string | null
+  lastDay: string | null
+  lastDocAt: string | null
+  months: TreeMonth[]
+}
+
+export interface Coverage {
+  projectCount: number
+  entryCount: number
+  entriesWithDoc: number
+  docCount: number
+  appendixCount: number
+  firstEntryDay: string | null
+  lastEntryDay: string | null
+}
+
+export interface TreeMeta {
+  root: string
+  timezone: string
+  sections: string[]
+  totals: Coverage
+}
+
+export interface SearchMatch {
+  offset: number
+  length: number
+  line: number
+  section: string | null
+  prefix: string
+  match: string
+  suffix: string
+  snippet: string
+}
+
+export interface SearchHit {
+  entryId: number
+  projectId: number | null
+  projectName: string | null
+  projectSlug: string
+  title: string
+  docTitle: string
+  localDay: string
+  month: string
+  relPath: string
+  path: string
+  matchCount: number
+  matches: SearchMatch[]
+  byteSize: number
+  recordedAt: string
+  file: DocFile
+}
+
+export interface SearchMeta {
+  query: string
+  documentsWithMatches: number
+  totalMatches: number
+  scanned: { documents: number; bytes: number; missing: number; elapsedMs: number }
+  truncated: boolean
+}
+
+export interface ListMeta {
+  root: string
+  timezone: string
+  page: { limit: number; offset: number; returned: number; total: number; hasMore: boolean }
+  counts: { withDoc: number; withoutDoc: number }
+  files: { verified: number; ok: number; changed: number; missing: number; unverified: number }
+  warnings: string[]
+}
+
+export interface CliPayload<D, M> {
+  data: D
+  meta: M
+}
+
+export function notesTree(): Promise<CliPayload<{ projects: TreeProject[] }, TreeMeta>> {
+  return invoke('notes_tree')
+}
+
+export function notesList(
+  project: string | null,
+  limit = 200,
+  offset = 0,
+): Promise<CliPayload<NoteRow[], ListMeta>> {
+  return invoke('notes_list', { project, limit, offset })
+}
+
+export function notesToday(): Promise<CliPayload<NoteRow[], ListMeta>> {
+  return invoke('notes_today')
+}
+
+export function notesDocument(entryId: number): Promise<CliPayload<NoteDocument, TreeMeta>> {
+  return invoke('notes_document', { entryId })
+}
+
+export function notesSearch(
+  query: string,
+  project: string | null,
+): Promise<CliPayload<SearchHit[], SearchMeta>> {
+  return invoke('notes_search', { query, project })
+}
+
+export function notesMigrate(): Promise<CliPayload<unknown, unknown>> {
+  return invoke('notes_migrate')
+}
+
+export function openDocument(relPath: string): Promise<void> {
+  return invoke<void>('open_document', { relPath })
+}
+
+export function openExternal(url: string): Promise<void> {
+  return invoke<void>('open_external', { url })
+}
+
+export function copyText(text: string): Promise<void> {
+  return invoke<void>('copy_text', { text })
+}
+
+export function onDocsChanged(handler: () => void): void {
+  void listen(DOCS_CHANGED_EVENT, () => {
+    handler()
+  })
+}
+
+export function onNotesFocus(handler: (entryId: number) => void): void {
+  void listen<number>(NOTES_FOCUS_EVENT, (event) => {
+    handler(event.payload)
+  })
 }
 
 export function quit(): Promise<void> {

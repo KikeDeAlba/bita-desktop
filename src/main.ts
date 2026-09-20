@@ -4,6 +4,8 @@ import {
   describeProblem,
   discardTimer,
   doctorReport,
+  notesToday,
+  onDocsChanged,
   onSnapshot,
   openNotes,
   pending,
@@ -17,6 +19,7 @@ import {
   unsetScope,
   worked,
   type LiveTimer,
+  type NoteRow,
   type Problem,
   type Project,
   type Scope,
@@ -25,6 +28,7 @@ import {
 } from './bita.ts'
 import { element, iconButton, must } from './dom.ts'
 import { clock, human, startedAt } from './format.ts'
+import { timerDoc, todayNotes } from './notes-panel.ts'
 import { renderSettings } from './settings.ts'
 import { projectColor, renderPending, renderRepos, renderWorked } from './tabs.ts'
 
@@ -56,6 +60,7 @@ let failure: Problem | null = null
 let painted = ''
 let busy = false
 let inSettings = false
+let notesOfToday: NoteRow[] = []
 
 function isTab(value: string): value is Tab {
   return (TABS as readonly string[]).includes(value)
@@ -64,9 +69,15 @@ function isTab(value: string): value is Tab {
 function signature(): string {
   if (latest.problem !== null) return `problem:${latest.problem.message}`
   const timers = latest.running
-    .map((timer) => `${timer.id}:${timer.draft}:${timer.title}:${timer.projectName}`)
+    .map(
+      (timer) =>
+        `${timer.id}:${timer.draft}:${timer.title}:${timer.projectName}:${timer.sectionsWritten}/${timer.sectionsTotal}:${timer.touchedSinceNote}`,
+    )
     .join('|')
-  return `${timers}::${editing}::${failure?.message ?? ''}::${confirmingDiscard}`
+  const notes = notesOfToday
+    .map((row) => `${row.entryId}:${row.doc?.sectionCount ?? -1}`)
+    .join('|')
+  return `${timers}::${notes}::${editing}::${failure?.message ?? ''}::${confirmingDiscard}`
 }
 
 async function act(run: () => Promise<Snapshot>): Promise<void> {
@@ -135,6 +146,9 @@ function timerCard(timer: LiveTimer): HTMLElement {
   face.dataset['clock'] = String(timer.id)
   row.append(face, stopButton(timer))
   card.append(row)
+
+  const doc = timerDoc(timer)
+  if (doc !== null) card.append(doc)
 
   if (editing === timer.id) {
     card.append(editForm(timer))
@@ -268,6 +282,8 @@ function renderAhora(): void {
     empty.append(element('p', 'empty-title', 'El reloj está parado'))
     empty.append(element('p', 'empty-note', `Hoy has medido ${human(latest.todaySeconds)}.`))
     view.append(empty)
+    const notes = todayNotes(notesOfToday)
+    if (notes !== null) view.append(notes)
     return
   }
 
@@ -284,6 +300,20 @@ function renderAhora(): void {
       ),
     )
   }
+
+  const notes = todayNotes(notesOfToday)
+  if (notes !== null) view.append(notes)
+}
+
+async function loadTodayNotes(): Promise<void> {
+  try {
+    const payload = await notesToday()
+    notesOfToday = payload.data
+  } catch {
+    notesOfToday = []
+  }
+  painted = ''
+  paint()
 }
 
 function tickClocks(): void {
@@ -449,6 +479,10 @@ async function start(): Promise<void> {
     if (!inSettings) paint()
   })
 
+  onDocsChanged(() => {
+    void loadTodayNotes()
+  })
+
   latest = await snapshot()
   paint()
 
@@ -469,6 +503,8 @@ async function start(): Promise<void> {
   } catch {
     catalog = []
   }
+
+  void loadTodayNotes()
 }
 
 void start()

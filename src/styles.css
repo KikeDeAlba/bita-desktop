@@ -1017,3 +1017,103 @@ input {
   background: var(--danger);
   color: var(--inset);
 }
+
+.timer-doc {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--elev);
+}
+
+.timer-doc-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timer-doc-mark {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--fg-mute);
+}
+
+.timer-doc-count {
+  flex-grow: 1;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+
+.timer-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--blue);
+}
+
+.timer-doc-estimate {
+  margin-top: 7px;
+  font-size: 10.5px;
+  color: var(--estimate);
+}
+
+.today-notes {
+  margin-top: 14px;
+}
+
+.today-list {
+  border-top: 1px solid var(--line-soft);
+}
+
+.today-note {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+  color: var(--fg);
+}
+
+.today-note:hover {
+  background: var(--card-quiet);
+}
+
+.today-note--empty {
+  opacity: 0.8;
+}
+
+.today-note-text {
+  flex-grow: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.today-note-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.today-note--empty .today-note-title {
+  color: var(--fg-mute);
+}
+
+.today-note--empty .pill--empty {
+  align-self: flex-start;
+  font-size: 10px;
+}
+
+.today-note-meta {
+  font-size: 10.5px;
+  color: var(--fg-mute);
+}
+
+.today-note-go {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--elev-strong);
+}
