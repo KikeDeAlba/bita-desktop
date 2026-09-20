@@ -219,7 +219,7 @@ fn canonical(path: PathBuf) -> PathBuf {
     fs::canonicalize(&path).unwrap_or(path)
 }
 
-fn database_path() -> PathBuf {
+pub fn database_path() -> PathBuf {
     if let Some(explicit) = env::var_os(DB_OVERRIDE_ENV) {
         return PathBuf::from(explicit);
     }

@@ -4,6 +4,7 @@ mod model;
 mod panel;
 mod state;
 mod tray;
+mod watch;
 
 use std::time::Duration;
 
@@ -14,7 +15,7 @@ use tokio::time::{interval, MissedTickBehavior};
 use state::AppState;
 
 const TICK: Duration = Duration::from_secs(1);
-const REFRESH: Duration = Duration::from_secs(15);
+const REFRESH: Duration = Duration::from_secs(30);
 const SNAPSHOT_EVENT: &str = "bita://snapshot";
 
 fn main() {
@@ -30,6 +31,7 @@ fn main() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             tray::create(app.handle())?;
             panel::wire(app.handle());
+            watch::spawn(app.handle().clone(), cli::database_path());
             spawn_refresh(app.handle().clone());
             spawn_tick(app.handle().clone());
             Ok(())
