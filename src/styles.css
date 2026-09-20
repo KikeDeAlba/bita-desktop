@@ -1,0 +1,70 @@
+:root {
+  --bg-page: #1d2021;
+  --bg: #32302f;
+  --inset: #282828;
+  --card: #3c3836;
+  --card-quiet: #35322f;
+  --elev: #504945;
+  --elev-strong: #665c54;
+  --line: #45403d;
+  --line-soft: #3c3836;
+
+  --fg: #ebdbb2;
+  --fg-bright: #fbf1c7;
+  --fg-dim: #bdae93;
+  --fg-mute: #a89984;
+  --fg-faint: #928374;
+
+  --running: #fe8019;
+  --estimate: #fabd2f;
+  --ok: #b8bb26;
+  --aqua: #8ec07c;
+  --blue: #83a598;
+  --purple: #d3869b;
+  --danger: #fb4934;
+
+  --radius: 12px;
+  --radius-card: 9px;
+  --radius-control: 7px;
+
+  --font-ui: 'Instrument Sans', -apple-system, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+#panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid var(--elev);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  cursor: default;
+}
+
+input {
+  font-family: inherit;
+  user-select: text;
+}

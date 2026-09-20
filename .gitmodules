@@ -1,0 +1,5 @@
+[submodule "vendor/bita"]
+	path = vendor/bita
+	url = https://github.com/KikeDeAlba/bita.git
+	branch = develop
+	shallow = true
