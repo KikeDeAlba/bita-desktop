@@ -3,6 +3,7 @@ mod commands;
 mod doctor;
 mod model;
 mod panel;
+mod screen;
 mod state;
 mod tray;
 mod watch;
