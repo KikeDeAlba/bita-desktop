@@ -3,7 +3,6 @@ import {
   describeProblem,
   notesDocument,
   notesList,
-  notesMigrate,
   notesSearch,
   notesTakeFocus,
   notesTree,
@@ -11,7 +10,6 @@ import {
   onNotesFocus,
   openDocument,
   openExternal,
-  type Coverage,
   type NoteDocument,
   type NoteRow,
   type Problem,
@@ -27,7 +25,7 @@ const railHost = must<HTMLElement>('#rail')
 const readerHost = must<HTMLElement>('#reader')
 
 let projects: TreeProject[] = []
-let coverage: Coverage | null = null
+let docCount = 0
 let sections: readonly string[] = FALLBACK_SECTIONS
 let rows = new Map<string, NoteRow[]>()
 let expanded = new Set<string>()
@@ -40,7 +38,6 @@ let hitCount = 0
 let failure: Problem | null = null
 let loadingTree = true
 let loadingDoc = false
-let migrating = false
 
 let railPainted = ''
 let readerPainted = ''
@@ -55,7 +52,7 @@ function railState(): RailState {
     selected,
     query,
     results,
-    docCount: coverage?.docCount ?? 0,
+    docCount,
     loading: loadingTree,
   }
 }
@@ -69,12 +66,10 @@ function readerState(): ReaderState {
     query,
     hit,
     hitCount,
-    coverage,
     failure,
     loading: loadingDoc,
     canPrev: at > 0,
     canNext: at !== -1 && at < order.length - 1,
-    migrating,
   }
 }
 
@@ -82,7 +77,7 @@ function railSignature(): string {
   const loaded = [...rows.entries()].map(([slug, list]) => `${slug}:${list.length}`).join(',')
   return [
     projects.length,
-    coverage?.docCount ?? 0,
+    docCount,
     [...expanded].sort().join('|'),
     loaded,
     selected ?? 'none',
@@ -102,8 +97,6 @@ function readerSignature(): string {
     hitCount,
     failure?.message ?? '',
     loadingDoc,
-    migrating,
-    coverage?.entriesWithDoc ?? -1,
   ].join('~')
 }
 
@@ -131,7 +124,6 @@ function paint(): void {
       onOpenExternal: (url) => {
         void openExternal(url).catch(showFailure)
       },
-      onMigrate: migrate,
       onHit: moveHit,
     })
     afterReaderPaint()
@@ -298,18 +290,6 @@ function copy(text: string): void {
   void copyText(text).catch(showFailure)
 }
 
-function migrate(): void {
-  migrating = true
-  paint()
-  void notesMigrate()
-    .then(() => loadTree())
-    .catch(showFailure)
-    .finally(() => {
-      migrating = false
-      paint()
-    })
-}
-
 function showFailure(error: unknown): void {
   failure = describeProblem(error)
   paint()
@@ -320,7 +300,7 @@ async function loadTree(): Promise<void> {
   try {
     const payload = await notesTree()
     projects = payload.data.projects
-    coverage = payload.meta.totals
+    docCount = payload.meta.totals.docCount
     if (payload.meta.sections?.length) sections = payload.meta.sections
     failure = null
   } catch (error) {

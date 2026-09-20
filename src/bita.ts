@@ -370,10 +370,6 @@ export function notesSearch(
   return invoke('notes_search', { query, project })
 }
 
-export function notesMigrate(): Promise<CliPayload<unknown, unknown>> {
-  return invoke('notes_migrate')
-}
-
 export function openDocument(relPath: string): Promise<void> {
   return invoke<void>('open_document', { relPath })
 }

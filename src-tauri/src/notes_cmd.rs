@@ -1,5 +1,4 @@
 use std::path::{Component, Path, PathBuf};
-use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
@@ -9,7 +8,6 @@ use crate::cli;
 use crate::model::{Problem, ProblemKind};
 use crate::state::AppState;
 
-const MIGRATE_TIMEOUT: Duration = Duration::from_secs(120);
 const OPEN: &str = "/usr/bin/open";
 const MIN_CLI: &str = "0.3.0";
 
@@ -95,16 +93,6 @@ pub async fn notes_search(
         args.push(project);
     }
     payload(&app, &args).await
-}
-
-#[tauri::command]
-pub async fn notes_migrate(app: AppHandle) -> Result<CliPayload, Problem> {
-    let handle = app.state::<AppState>().require_cli(&app).await?;
-    let (data, meta) = handle
-        .call_slow::<serde_json::Value>(&["notes", "migrate"], MIGRATE_TIMEOUT)
-        .await
-        .map_err(stale_cli)?;
-    Ok(CliPayload { data, meta })
 }
 
 #[tauri::command]
