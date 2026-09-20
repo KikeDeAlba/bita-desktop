@@ -201,3 +201,152 @@ input {
   color: var(--fg-faint);
   font-size: 12px;
 }
+
+.timers {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.timer {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 11px 12px;
+  background: var(--card);
+  border: 1px solid var(--elev);
+  border-radius: var(--radius-card);
+}
+
+.timer--draft {
+  background: var(--card-quiet);
+  border: 1px dashed var(--elev-strong);
+}
+
+.timer-title {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.32;
+}
+
+.timer-unnamed {
+  font-style: italic;
+  font-weight: 400;
+  color: var(--fg-dim);
+}
+
+.timer-id {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--fg-mute);
+}
+
+.timer-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--elev);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pill--empty {
+  background: none;
+  border: 1px dashed var(--elev-strong);
+  padding: 2px 7px;
+  color: var(--fg-mute);
+  font-weight: 400;
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.timer-since {
+  flex-grow: 1;
+  font-size: 11px;
+  color: var(--fg-mute);
+}
+
+.timer-clock {
+  font-family: var(--font-mono);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--running);
+}
+
+.timer--draft .timer-clock {
+  color: var(--fg-dim);
+}
+
+.note {
+  margin: 10px 2px 0 2px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-mute);
+}
+
+.empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.empty-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg-dim);
+}
+
+.empty-note {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--fg-mute);
+}
+
+.problem {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  background: var(--card);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-card);
+}
+
+.problem-message {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.problem-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--inset);
+  color: var(--fg-dim);
+  user-select: text;
+}
