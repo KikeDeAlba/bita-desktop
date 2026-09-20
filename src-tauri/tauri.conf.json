@@ -34,7 +34,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -44,6 +47,11 @@
     ],
     "macOS": {
       "minimumSystemVersion": "13.0"
+    },
+    "resources": {
+      "../vendor/bita/src": "bita/src",
+      "../vendor/bita/scripts": "bita/scripts",
+      "../vendor/bita/package.json": "bita/package.json"
     }
   }
 }
