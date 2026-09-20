@@ -4,7 +4,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::cli::Source;
 use crate::doctor::{self, Report};
-use crate::model::{Problem, Scope, SummaryData, SummaryMeta, SummaryView, Snapshot};
+use crate::model::{Problem, ProblemKind, Scope, SummaryData, SummaryMeta, SummaryView, Snapshot};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -184,6 +184,21 @@ pub async fn install_cli(app: AppHandle) -> Result<String, Problem> {
     let state = app.state::<AppState>();
     state.refresh(&app).await;
     Ok(log)
+}
+
+#[tauri::command]
+pub fn open_notes(app: AppHandle, entry_id: Option<i64>) -> Result<(), Problem> {
+    crate::notes::open(&app, entry_id).map_err(|error| {
+        Problem::new(
+            ProblemKind::Unreadable,
+            format!("No pude abrir la ventana de notas: {error}"),
+        )
+    })
+}
+
+#[tauri::command]
+pub fn notes_take_focus(app: AppHandle) -> Option<i64> {
+    crate::notes::take_focus(&app)
 }
 
 #[tauri::command]

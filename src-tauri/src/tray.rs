@@ -141,6 +141,10 @@ mod tests {
         LiveTimer {
             id,
             title: if draft { None } else { Some("Algo".into()) },
+            doc_rel_path: None,
+            sections_written: None,
+            sections_total: None,
+            touched_since_note: None,
             project_name: project.map(str::to_string),
             project_id: project.map(|_| 1),
             started_at: started_at.into(),

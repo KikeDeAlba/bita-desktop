@@ -6,6 +6,9 @@ export default defineConfig({
   clearScreen: false,
   build: {
     target: 'safari18',
+    rollupOptions: {
+      input: { index: 'index.html', notas: 'notas.html' },
+    },
   },
   server: {
     port: 1420,

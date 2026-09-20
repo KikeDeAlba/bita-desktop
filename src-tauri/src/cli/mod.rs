@@ -1,7 +1,7 @@
 pub mod node;
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use std::{env, fs};
@@ -16,6 +16,8 @@ use crate::model::{CliError, Envelope, Problem, ProblemKind, SUPPORTED_SCHEMA};
 
 const CLI_OVERRIDE_ENV: &str = "BITA_CLI";
 const DB_OVERRIDE_ENV: &str = "BITA_DB_PATH";
+const DOCS_OVERRIDE_ENV: &str = "BITA_DOCS_DIR";
+const EDITOR_OVERRIDE_ENV: &str = "BITA_EDITOR";
 const BUNDLED_ENTRY: &str = "bita/src/bin/bita.ts";
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -134,6 +136,10 @@ impl Cli {
             .stdin(Stdio::null())
             .kill_on_drop(true);
 
+        if let Some(docs) = env::var_os(DOCS_OVERRIDE_ENV) {
+            command.arg("--docs-dir").arg(docs);
+        }
+
         if let Some(home) = env::var_os("HOME") {
             command.env("HOME", home);
         }
@@ -246,6 +252,39 @@ fn bin_directories() -> Vec<PathBuf> {
 
 fn canonical(path: PathBuf) -> PathBuf {
     fs::canonicalize(&path).unwrap_or(path)
+}
+
+pub fn version_of(node: &Path, entry: &Path) -> Option<String> {
+    let output = std::process::Command::new(node)
+        .arg(entry)
+        .arg("--version")
+        .current_dir("/")
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let first = text.lines().next()?.trim();
+    if first.is_empty() {
+        return None;
+    }
+    Some(first.to_string())
+}
+
+pub fn docs_root() -> PathBuf {
+    if let Some(explicit) = env::var_os(DOCS_OVERRIDE_ENV) {
+        return PathBuf::from(explicit);
+    }
+
+    let database = database_path();
+    match database.parent() {
+        Some(parent) => parent.join("docs"),
+        None => PathBuf::from("/tmp").join("docs"),
+    }
+}
+
+pub fn editor_override() -> Option<OsString> {
+    env::var_os(EDITOR_OVERRIDE_ENV)
 }
 
 pub fn database_path() -> PathBuf {
