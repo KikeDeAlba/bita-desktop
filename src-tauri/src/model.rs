@@ -26,6 +26,14 @@ pub struct Entry {
     pub id: i64,
     pub description: String,
     #[serde(default)]
+    pub doc_rel_path: Option<String>,
+    #[serde(default)]
+    pub sections_written: Option<i64>,
+    #[serde(default)]
+    pub sections_total: Option<i64>,
+    #[serde(default)]
+    pub touched_since_note: Option<i64>,
+    #[serde(default)]
     pub project_id: Option<i64>,
     #[serde(default)]
     pub project_name: Option<String>,
@@ -51,6 +59,10 @@ impl Entry {
 pub struct LiveTimer {
     pub id: i64,
     pub title: Option<String>,
+    pub doc_rel_path: Option<String>,
+    pub sections_written: Option<i64>,
+    pub sections_total: Option<i64>,
+    pub touched_since_note: Option<i64>,
     pub project_name: Option<String>,
     pub project_id: Option<i64>,
     pub started_at: String,
@@ -115,6 +127,8 @@ pub struct Group {
     pub estimate_human: String,
     pub entry_ids: Vec<i64>,
     pub days: Vec<String>,
+    #[serde(default)]
+    pub docs: Vec<serde_json::Value>,
     pub part_index: u32,
     pub part_count: u32,
     #[serde(default)]

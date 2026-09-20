@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager};
 use crate::state::AppState;
 
 const DEBOUNCE: Duration = Duration::from_millis(200);
+const DOCS_DEBOUNCE: Duration = Duration::from_millis(400);
 
 type Fingerprint = Option<(SystemTime, u64)>;
 
@@ -48,6 +49,7 @@ pub fn spawn(app: AppHandle, database: PathBuf) -> bool {
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 handle.state::<AppState>().refresh(&handle).await;
+                crate::notes::mark_stale(&handle);
             });
         }
 
@@ -55,6 +57,50 @@ pub fn spawn(app: AppHandle, database: PathBuf) -> bool {
     });
 
     true
+}
+
+pub fn spawn_docs(app: AppHandle, root: PathBuf) -> bool {
+    if !root.is_dir() {
+        return false;
+    }
+
+    thread::spawn(move || {
+        let (sender, receiver) = mpsc::channel::<DebounceEventResult>();
+        let Ok(mut debouncer) = new_debouncer(DOCS_DEBOUNCE, None, sender) else {
+            return;
+        };
+        if debouncer.watch(&root, RecursiveMode::Recursive).is_err() {
+            return;
+        }
+
+        for batch in receiver {
+            let Ok(events) = batch else {
+                continue;
+            };
+            if !events.iter().any(touches_markdown) {
+                continue;
+            }
+
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                crate::notes::mark_stale(&handle);
+            });
+        }
+
+        drop(debouncer);
+    });
+
+    true
+}
+
+fn touches_markdown(event: &notify_debouncer_full::DebouncedEvent) -> bool {
+    if matches!(event.kind, notify::EventKind::Access(_)) {
+        return false;
+    }
+    event
+        .paths
+        .iter()
+        .any(|path| path.extension().and_then(|value| value.to_str()) == Some("md"))
 }
 
 fn fingerprint(database: &Path) -> Fingerprint {

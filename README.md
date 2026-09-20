@@ -74,6 +74,9 @@ clic derecho en el icono → **Salir de bita**.
 | **Jira** | Lo que sigue sin registrar. Solo lectura |
 | **Repos** | Las rutas que resuelven a cada proyecto, y el catálogo de proyectos |
 
+Y una **ventana aparte** para leer las notas, que se abre con el icono de
+documento de la barra o con «Ver nota» en la tarjeta del cronómetro.
+
 Dos cosas del dominio que la interfaz intenta hacer evidentes:
 
 - Un **borrador** es un cronómetro sin título. Arranca vacío y se va rellenando
@@ -105,15 +108,22 @@ que debe.
 
 ```sh
 cp ~/.local/share/bita/bita.db /tmp/bita-dev.db
-BITA_DB_PATH=/tmp/bita-dev.db pnpm tauri dev
+cp -R ~/.local/share/bita/docs /tmp/bita-dev-docs
+BITA_DB_PATH=/tmp/bita-dev.db BITA_DOCS_DIR=/tmp/bita-dev-docs pnpm tauri dev
 ```
+
+Los documentos van aparte porque la ventana de notas también lee de ahí.
 
 | Variable | Para qué |
 |---|---|
 | `BITA_DB_PATH` | Usar otra base de datos |
 | `BITA_NODE` | Forzar un binario de node concreto |
 | `BITA_CLI` | Forzar un CLI concreto en vez de buscarlo |
+| `BITA_DOCS_DIR` | Usar otro directorio de documentos; se le pasa al CLI como `--docs-dir` |
 | `BITA_KEEP_PANEL` | Abre el panel al arrancar y evita que se esconda al perder el foco, para poder usar las devtools |
+| `BITA_OPEN_NOTES` | Abre la ventana de notas al arrancar, para no depender del tray |
+| `BITA_KEEP_ACCESSORY` | No cambia la activation policy al abrir las notas: sin icono en el Dock ni barra de menús |
+| `BITA_EDITOR` | Qué binario abre un `.md` en vez de dejárselo a `open` |
 
 ## Cómo habla con el CLI
 
@@ -159,6 +169,42 @@ deja el fichero intacto y toda escritura hace checkpoint al cerrar y mueve el
 Como red de seguridad hay además un sondeo cada treinta segundos, porque FSEvents
 pierde eventos cuando el equipo se suspende.
 
+Los `.md` necesitan su propio vigilante. El de la base mira `dirname(db)` sin
+recursión y descarta toda tanda que no mueva el fingerprint de `bita.db`; los
+documentos viven tres niveles más abajo, así que no llegaban eventos. El segundo
+vigilante es recursivo sobre el directorio de documentos, con rebote de 400 ms y
+filtrando a extensión `.md`. No hay bucle de realimentación: la app nunca escribe
+un `.md`, solo los lee a través del subproceso del CLI, y leer no mueve el
+`mtime`.
+
+## La ventana de notas
+
+El panel mide 380×520 y no es redimensionable, así que un documento de siete
+secciones no cabe. Las notas viven en una ventana propia de 960×640, de solo
+lectura: escribir sigue siendo del CLI, que es quien tiene el lock cooperativo.
+
+Se construye desde Rust bajo demanda en vez de declararla en `tauri.conf.json`.
+Una ventana declarada se crea al arrancar aunque esté oculta, y eso es un segundo
+webview residente para una vista que se abre de vez en cuando. Al cerrarla se
+esconde en lugar de destruirse, así que la segunda apertura es inmediata.
+
+Lleva su propio HTML (`notas.html`) y no una rama dentro de `index.html`, porque
+`scripts/measure-panel.swift` carga `index.html` en un WKWebView pelado, sin IPC
+de Tauri: una rama sobre `getCurrentWindow()` dejaría al test midiendo algo
+indeterminado. Rollup comparte `dom`, `format` y `bita` entre los dos bundles.
+
+Mientras está abierta, macOS pasa de `Accessory` a `Regular`. Sin eso la app no
+tiene barra de menús —y por tanto no hay cmd+C nativo sobre una selección— ni se
+puede recuperar la ventana con cmd+Tab. El menú son items predefinidos en
+español, que es de donde salen cmd+W, cmd+C y cmd+A sin una línea de JavaScript.
+
+El markdown se pinta con un renderizador propio de unas 250 líneas que construye
+nodos con `element()`. No es por el peso: `marked` y `markdown-it` devuelven un
+string de HTML, lo que obliga a `innerHTML` sobre contenido leído de ficheros, y
+sanearlo bien exige una segunda dependencia. Construyendo nodos no hay nada que
+escapar, porque el escapado es estructural. Lo que la gramática no reconoce se
+emite como párrafo literal: nunca se pierde contenido.
+
 ## Dónde se coloca el panel
 
 La vertical **no** sale del rectángulo del icono del tray, sale de
@@ -174,6 +220,7 @@ pegado al borde derecho no empuje el panel fuera.
 
 ```
 src/            el panel: TypeScript, sin framework
+src/notes/      la ventana de notas: carril, lector, markdown
 src-tauri/      el backend: tray, estado, subprocesos, vigilancia
 vendor/bita/    el CLI, como submódulo fijado
 ```

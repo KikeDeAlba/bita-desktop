@@ -11,6 +11,10 @@ use crate::model::{Entry, LiveTimer, Problem, Snapshot};
 struct Running {
     id: i64,
     title: Option<String>,
+    doc_rel_path: Option<String>,
+    sections_written: Option<i64>,
+    sections_total: Option<i64>,
+    touched_since_note: Option<i64>,
     project_name: Option<String>,
     project_id: Option<i64>,
     started_at: DateTime<Utc>,
@@ -31,6 +35,10 @@ impl Running {
             } else {
                 Some(entry.description.clone())
             },
+            doc_rel_path: entry.doc_rel_path.clone(),
+            sections_written: entry.sections_written,
+            sections_total: entry.sections_total,
+            touched_since_note: entry.touched_since_note,
             project_name: entry.project_name.clone(),
             project_id: entry.project_id,
             started_at,
@@ -47,6 +55,10 @@ impl Running {
         LiveTimer {
             id: self.id,
             title: self.title.clone(),
+            doc_rel_path: self.doc_rel_path.clone(),
+            sections_written: self.sections_written,
+            sections_total: self.sections_total,
+            touched_since_note: self.touched_since_note,
             project_name: self.project_name.clone(),
             project_id: self.project_id,
             started_at: self.started_at.to_rfc3339(),
