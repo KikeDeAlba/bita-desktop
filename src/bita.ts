@@ -143,6 +143,28 @@ export function unsetScope(prefix: string): Promise<Scope[]> {
   return invoke<Scope[]>('unset_scope', { prefix })
 }
 
+export interface Check {
+  id: string
+  health: 'ok' | 'warn' | 'fail'
+  title: string
+  detail: string
+  note: string | null
+}
+
+export interface Report {
+  checks: Check[]
+  canInstall: boolean
+  blocked: boolean
+}
+
+export function doctorReport(): Promise<Report> {
+  return invoke<Report>('doctor_report')
+}
+
+export function installCli(): Promise<string> {
+  return invoke<string>('install_cli')
+}
+
 export function onSnapshot(handler: (value: Snapshot) => void): void {
   void listen<Snapshot>(SNAPSHOT_EVENT, (event) => {
     handler(event.payload)

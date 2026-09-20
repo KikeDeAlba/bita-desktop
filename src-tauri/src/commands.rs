@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::cli::Source;
+use crate::doctor::{self, Report};
 use crate::model::{Problem, Scope, SummaryData, SummaryMeta, SummaryView, Snapshot};
 use crate::state::AppState;
 
@@ -169,4 +170,18 @@ pub async fn unset_scope(app: AppHandle, prefix: String) -> Result<Vec<Scope>, P
     let cli = app.state::<AppState>().require_cli(&app).await?;
     cli.run(&["scope", "unset", prefix.trim()]).await?;
     cli.call(&["scope", "list"]).await
+}
+
+#[tauri::command]
+pub async fn doctor_report(app: AppHandle) -> Result<Report, Problem> {
+    Ok(doctor::report(&app).await)
+}
+
+#[tauri::command]
+pub async fn install_cli(app: AppHandle) -> Result<String, Problem> {
+    let log = doctor::install(&app).await?;
+    app.state::<AppState>().forget_cli();
+    let state = app.state::<AppState>();
+    state.refresh(&app).await;
+    Ok(log)
 }

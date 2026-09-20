@@ -203,7 +203,7 @@ impl Cli {
     }
 }
 
-fn resolve_entry(app: &AppHandle) -> Option<(PathBuf, Source)> {
+pub fn resolve_entry(app: &AppHandle) -> Option<(PathBuf, Source)> {
     if let Some(explicit) = env::var_os(CLI_OVERRIDE_ENV) {
         let path = PathBuf::from(explicit);
         if path.is_file() {

@@ -3,6 +3,7 @@ import {
   amendTimer,
   describeProblem,
   discardTimer,
+  doctorReport,
   onSnapshot,
   pending,
   projects,
@@ -23,6 +24,7 @@ import {
 } from './bita.ts'
 import { element, iconButton, must } from './dom.ts'
 import { clock, human, startedAt } from './format.ts'
+import { renderSettings } from './settings.ts'
 import { projectColor, renderPending, renderRepos, renderWorked } from './tabs.ts'
 
 const TABS = ['ahora', 'hoy', 'jira', 'repos'] as const
@@ -36,6 +38,8 @@ const launcher = must<HTMLElement>('#launcher')
 const launchForm = must<HTMLFormElement>('#launch-form')
 const launchTitle = must<HTMLInputElement>('#launch-title')
 const launchBlank = must<HTMLButtonElement>('#launch-blank')
+const tabStrip = must<HTMLElement>('.tabs')
+const gear = must<HTMLButtonElement>('#open-settings')
 
 let tab: Tab = 'ahora'
 let latest: Snapshot = { running: [], todaySeconds: 0, problem: null }
@@ -49,6 +53,7 @@ let confirmingDiscard = false
 let failure: Problem | null = null
 let painted = ''
 let busy = false
+let inSettings = false
 
 function isTab(value: string): value is Tab {
   return (TABS as readonly string[]).includes(value)
@@ -289,9 +294,9 @@ function tickClocks(): void {
 function paint(): void {
   todayTotal.textContent = human(latest.todaySeconds)
   barMark.dataset['idle'] = String(latest.running.length === 0)
-  launcher.hidden = tab !== 'ahora' || editing !== null
+  launcher.hidden = inSettings || tab !== 'ahora' || editing !== null
 
-  if (tab !== 'ahora') return
+  if (inSettings || tab !== 'ahora') return
 
   const current = signature()
   if (current === painted) {
@@ -359,7 +364,35 @@ async function reposAction(
   }
 }
 
+async function showSettings(): Promise<void> {
+  inSettings = true
+  tabStrip.hidden = true
+  launcher.hidden = true
+  painted = ''
+  busyView()
+  try {
+    const report = await doctorReport()
+    if (!inSettings) return
+    renderSettings(
+      view,
+      report,
+      () => {
+        inSettings = false
+        tabStrip.hidden = false
+        showTab(tab)
+      },
+      () => {
+        void showSettings()
+      },
+    )
+  } catch (error) {
+    if (inSettings) failureView(error)
+  }
+}
+
 function showTab(next: Tab): void {
+  inSettings = false
+  tabStrip.hidden = false
   tab = next
   painted = ''
   launcher.hidden = next !== 'ahora'
@@ -395,15 +428,31 @@ async function start(): Promise<void> {
     void act(() => startTimer(null, null))
   })
 
+  gear.addEventListener('click', () => {
+    if (inSettings) {
+      inSettings = false
+      tabStrip.hidden = false
+      showTab(tab)
+      return
+    }
+    void showSettings()
+  })
+
   onSnapshot((value) => {
     latest = value
-    paint()
+    if (!inSettings) paint()
   })
 
   latest = await snapshot()
   paint()
   latest = await refresh()
   paint()
+
+  if (latest.problem !== null) {
+    void showSettings()
+    return
+  }
+
   try {
     catalog = await projects()
   } catch {
