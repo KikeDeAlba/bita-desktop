@@ -57,16 +57,16 @@ function groupRow(group: Group, widest: number): HTMLElement {
     element('span', undefined, `${group.projectName ?? 'sin proyecto'} · ${blocks}${span}${part}`),
   )
 
-  const track = element('div', 'bar-track')
+  const track = element('div', 'meter-track')
   track.style.width = `${Math.max(4, Math.round((group.estimateSeconds / widest) * 100))}%`
-  const fill = element('div', 'bar-fill')
+  const fill = element('div', 'meter-fill')
   const ratio = group.estimateSeconds === 0 ? 0 : group.totalSeconds / group.estimateSeconds
   fill.style.width = `${Math.min(100, Math.round(ratio * 100))}%`
   track.append(fill)
-  const bar = element('div', 'bar')
-  bar.append(track)
+  const meter = element('div', 'meter')
+  meter.append(track)
 
-  row.append(head, meta, bar)
+  row.append(head, meta, meter)
   return row
 }
 

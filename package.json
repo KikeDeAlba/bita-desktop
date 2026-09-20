@@ -12,7 +12,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "measure": "pnpm build && ./scripts/measure-panel.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2"
