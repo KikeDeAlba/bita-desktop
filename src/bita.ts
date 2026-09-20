@@ -73,6 +73,76 @@ export function amendTimer(
   return invoke<Snapshot>('amend_timer', { id, title, project })
 }
 
+export interface Group {
+  summary: string
+  projectId: number | null
+  projectName: string | null
+  totalSeconds: number
+  totalHuman: string
+  estimateSeconds: number
+  estimateHuman: string
+  entryIds: number[]
+  days: string[]
+  partIndex: number
+  partCount: number
+  jiraProjectKey: string | null
+}
+
+export interface Overlap {
+  localDay: string
+  trackedSeconds: number
+  clockSeconds: number
+  overlapSeconds: number
+}
+
+export interface Excluded {
+  id: number
+  description: string
+  projectName: string | null
+  durationHuman: string
+  reason: string
+}
+
+export interface SummaryView {
+  totalSeconds: number
+  totalHuman: string
+  estimateSeconds: number
+  groups: Group[]
+  overlaps: Overlap[]
+  excluded: Excluded[]
+}
+
+export interface Scope {
+  prefix: string
+  projectId: number
+  projectName: string
+  slugSource: string
+}
+
+export function worked(range: 'today' | 'week'): Promise<SummaryView> {
+  return invoke<SummaryView>('worked', { range })
+}
+
+export function pending(): Promise<SummaryView> {
+  return invoke<SummaryView>('pending')
+}
+
+export function scopes(): Promise<Scope[]> {
+  return invoke<Scope[]>('scopes')
+}
+
+export function addProject(name: string): Promise<Project[]> {
+  return invoke<Project[]>('add_project', { name })
+}
+
+export function setScope(prefix: string, project: string): Promise<Scope[]> {
+  return invoke<Scope[]>('set_scope', { prefix, project })
+}
+
+export function unsetScope(prefix: string): Promise<Scope[]> {
+  return invoke<Scope[]>('unset_scope', { prefix })
+}
+
 export function onSnapshot(handler: (value: Snapshot) => void): void {
   void listen<Snapshot>(SNAPSHOT_EVENT, (event) => {
     handler(event.payload)

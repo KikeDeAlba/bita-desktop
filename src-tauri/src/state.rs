@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
@@ -14,7 +15,6 @@ struct Running {
     project_id: Option<i64>,
     started_at: DateTime<Utc>,
     start_local: String,
-    local_day: String,
     draft: bool,
 }
 
@@ -35,7 +35,6 @@ impl Running {
             project_id: entry.project_id,
             started_at,
             start_local: entry.start_local.clone(),
-            local_day: entry.local_day.clone(),
             draft,
         })
     }
@@ -62,7 +61,7 @@ impl Running {
 struct Inner {
     running: Vec<Running>,
     settled_today_seconds: i64,
-    today: String,
+    running_today: HashSet<i64>,
     problem: Option<Problem>,
 }
 
@@ -85,7 +84,7 @@ impl AppState {
         let running_today: i64 = inner
             .running
             .iter()
-            .filter(|entry| entry.local_day == inner.today)
+            .filter(|entry| inner.running_today.contains(&entry.id))
             .map(|entry| entry.elapsed(now))
             .sum();
 
@@ -131,18 +130,16 @@ impl AppState {
             .map(|entry| entry.duration_seconds)
             .sum();
 
-        let today_label = today
-            .first()
-            .map(|entry| entry.local_day.clone())
-            .or_else(|| running.first().map(|entry| entry.local_day.clone()))
-            .unwrap_or_default();
+        let running_today: HashSet<i64> = today
+            .iter()
+            .filter(|entry| entry.running)
+            .map(|entry| entry.id)
+            .collect();
 
         let mut inner = self.inner.lock().expect("state poisoned");
         inner.running = running.iter().filter_map(Running::from_entry).collect();
         inner.settled_today_seconds = settled_today_seconds;
-        if !today_label.is_empty() {
-            inner.today = today_label;
-        }
+        inner.running_today = running_today;
         inner.problem = None;
     }
 

@@ -1,39 +1,33 @@
 import {
+  addProject,
   amendTimer,
   describeProblem,
   discardTimer,
   onSnapshot,
+  pending,
   projects,
   refresh,
+  scopes,
+  setScope,
   snapshot,
   startTimer,
   stopTimer,
+  unsetScope,
+  worked,
   type LiveTimer,
   type Problem,
   type Project,
+  type Scope,
   type Snapshot,
+  type SummaryView,
 } from './bita.ts'
 import { element, iconButton, must } from './dom.ts'
 import { clock, human, startedAt } from './format.ts'
+import { projectColor, renderPending, renderRepos, renderWorked } from './tabs.ts'
 
 const TABS = ['ahora', 'hoy', 'jira', 'repos'] as const
 
 type Tab = (typeof TABS)[number]
-
-const SOON: Record<Tab, string> = {
-  ahora: '',
-  hoy: 'Lo trabajado hoy y esta semana',
-  jira: 'Lo que falta por registrar',
-  repos: 'Proyectos y las rutas que cubren',
-}
-
-const PROJECT_COLORS = [
-  'var(--aqua)',
-  'var(--blue)',
-  'var(--purple)',
-  'var(--ok)',
-  'var(--estimate)',
-] as const
 
 const view = must<HTMLElement>('#view')
 const todayTotal = must<HTMLElement>('#today-total')
@@ -46,6 +40,8 @@ const launchBlank = must<HTMLButtonElement>('#launch-blank')
 let tab: Tab = 'ahora'
 let latest: Snapshot = { running: [], todaySeconds: 0, problem: null }
 let catalog: Project[] = []
+let scopeList: Scope[] = []
+let workedRange: 'today' | 'week' = 'today'
 let editing: number | null = null
 let draftTitle = ''
 let draftProject = ''
@@ -56,11 +52,6 @@ let busy = false
 
 function isTab(value: string): value is Tab {
   return (TABS as readonly string[]).includes(value)
-}
-
-function projectColor(projectId: number | null): string {
-  if (projectId === null) return 'var(--fg-faint)'
-  return PROJECT_COLORS[projectId % PROJECT_COLORS.length] ?? 'var(--fg-faint)'
 }
 
 function signature(): string {
@@ -84,6 +75,19 @@ async function act(run: () => Promise<Snapshot>): Promise<void> {
     painted = ''
     paint()
   }
+}
+
+function busyView(): void {
+  view.replaceChildren(element('p', 'placeholder', 'Preguntando al CLI…'))
+}
+
+function failureView(error: unknown): void {
+  const problem = describeProblem(error)
+  view.replaceChildren()
+  const box = element('div', 'problem')
+  box.append(element('p', 'problem-message', problem.message))
+  if (problem.hint !== null) box.append(element('code', 'problem-hint', problem.hint))
+  view.append(box)
 }
 
 function stopButton(timer: LiveTimer): HTMLButtonElement {
@@ -298,23 +302,74 @@ function paint(): void {
   renderAhora()
 }
 
+async function loadWorked(): Promise<void> {
+  busyView()
+  try {
+    const data: SummaryView = await worked(workedRange)
+    if (tab !== 'hoy') return
+    renderWorked(view, data, workedRange, (next) => {
+      workedRange = next
+      void loadWorked()
+    })
+  } catch (error) {
+    if (tab === 'hoy') failureView(error)
+  }
+}
+
+async function loadPending(): Promise<void> {
+  busyView()
+  try {
+    const data = await pending()
+    if (tab === 'jira') renderPending(view, data)
+  } catch (error) {
+    if (tab === 'jira') failureView(error)
+  }
+}
+
+async function loadRepos(): Promise<void> {
+  busyView()
+  try {
+    ;[scopeList, catalog] = await Promise.all([scopes(), projects()])
+    if (tab !== 'repos') return
+    renderRepos(view, scopeList, catalog, {
+      onAddProject: (name) => void reposAction(() => addProject(name), 'projects'),
+      onAddScope: (prefix, project) => void reposAction(() => setScope(prefix, project), 'scopes'),
+      onRemoveScope: (prefix) => void reposAction(() => unsetScope(prefix), 'scopes'),
+    })
+  } catch (error) {
+    if (tab === 'repos') failureView(error)
+  }
+}
+
+async function reposAction(
+  run: () => Promise<Project[] | Scope[]>,
+  kind: 'projects' | 'scopes',
+): Promise<void> {
+  if (busy) return
+  busy = true
+  try {
+    const result = await run()
+    if (kind === 'projects') catalog = result as Project[]
+    else scopeList = result as Scope[]
+    busy = false
+    await loadRepos()
+  } catch (error) {
+    busy = false
+    failureView(error)
+  }
+}
+
 function showTab(next: Tab): void {
   tab = next
   painted = ''
+  launcher.hidden = next !== 'ahora'
   if (next === 'ahora') {
     paint()
     return
   }
-  launcher.hidden = true
-  view.replaceChildren(element('p', 'placeholder', SOON[next]))
-}
-
-async function loadCatalog(): Promise<void> {
-  try {
-    catalog = await projects()
-  } catch {
-    catalog = []
-  }
+  if (next === 'hoy') void loadWorked()
+  if (next === 'jira') void loadPending()
+  if (next === 'repos') void loadRepos()
 }
 
 async function start(): Promise<void> {
@@ -349,7 +404,11 @@ async function start(): Promise<void> {
   paint()
   latest = await refresh()
   paint()
-  await loadCatalog()
+  try {
+    catalog = await projects()
+  } catch {
+    catalog = []
+  }
 }
 
 void start()

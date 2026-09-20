@@ -30,7 +30,13 @@ fn main() {
             commands::start_timer,
             commands::stop_timer,
             commands::discard_timer,
-            commands::amend_timer
+            commands::amend_timer,
+            commands::worked,
+            commands::pending,
+            commands::scopes,
+            commands::add_project,
+            commands::set_scope,
+            commands::unset_scope
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
