@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 export const SNAPSHOT_EVENT = 'bita://snapshot'
+export const DOCS_CHANGED_EVENT = 'bita://docs-changed'
+export const NOTES_FOCUS_EVENT = 'bita://notes-focus'
 
 export type ProblemKind =
   | 'node-missing'
@@ -163,6 +165,14 @@ export function doctorReport(): Promise<Report> {
 
 export function installCli(): Promise<string> {
   return invoke<string>('install_cli')
+}
+
+export function openNotes(entryId: number | null): Promise<void> {
+  return invoke<void>('open_notes', { entryId })
+}
+
+export function notesTakeFocus(): Promise<number | null> {
+  return invoke<number | null>('notes_take_focus')
 }
 
 export function quit(): Promise<void> {

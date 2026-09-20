@@ -1,7 +1,9 @@
 mod cli;
 mod commands;
 mod doctor;
+mod menu;
 mod model;
+mod notes;
 mod panel;
 mod screen;
 mod state;
@@ -28,6 +30,7 @@ fn main() {
         }))
         .manage(AppState::new())
         .manage(TrayAnchor::default())
+        .manage(notes::NotesFocus::default())
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
             commands::refresh,
@@ -45,10 +48,13 @@ fn main() {
             commands::unset_scope,
             commands::doctor_report,
             commands::install_cli,
+            commands::open_notes,
+            commands::notes_take_focus,
             commands::quit
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            menu::create(app.handle())?;
             tray::create(app.handle())?;
             panel::wire(app.handle());
             watch::spawn(app.handle().clone(), cli::database_path());

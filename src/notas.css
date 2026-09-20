@@ -1,0 +1,25 @@
+body:has(#notas) {
+  background: var(--bg);
+}
+
+#notas {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  background: var(--bg);
+}
+
+#notas .rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--inset);
+  border-right: 1px solid var(--line);
+}
+
+#notas .reader {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}

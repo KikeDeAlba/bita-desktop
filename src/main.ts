@@ -5,6 +5,7 @@ import {
   discardTimer,
   doctorReport,
   onSnapshot,
+  openNotes,
   pending,
   projects,
   refresh,
@@ -40,6 +41,7 @@ const launchTitle = must<HTMLInputElement>('#launch-title')
 const launchBlank = must<HTMLButtonElement>('#launch-blank')
 const tabStrip = must<HTMLElement>('.tabs')
 const gear = must<HTMLButtonElement>('#open-settings')
+const notesButton = must<HTMLButtonElement>('#open-notes')
 
 let tab: Tab = 'ahora'
 let latest: Snapshot = { running: [], todaySeconds: 0, problem: null }
@@ -426,6 +428,10 @@ async function start(): Promise<void> {
   launchBlank.addEventListener('click', () => {
     launchTitle.value = ''
     void act(() => startTimer(null, null))
+  })
+
+  notesButton.addEventListener('click', () => {
+    void openNotes(null)
   })
 
   gear.addEventListener('click', () => {
