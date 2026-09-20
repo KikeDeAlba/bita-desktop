@@ -25,7 +25,12 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             commands::snapshot,
             commands::refresh,
-            commands::cli_info
+            commands::cli_info,
+            commands::projects,
+            commands::start_timer,
+            commands::stop_timer,
+            commands::discard_timer,
+            commands::amend_timer
         ])
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
