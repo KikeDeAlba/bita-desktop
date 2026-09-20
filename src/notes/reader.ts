@@ -1,4 +1,4 @@
-import type { Coverage, DocSection, NoteDocument, Problem } from '../bita.ts'
+import type { DocSection, NoteDocument, Problem } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import { renderMarkdown } from './markdown.ts'
 import { FALLBACK_SECTIONS, anchorOf, placeholderSections } from './sections.ts'
@@ -9,7 +9,6 @@ export interface ReaderHandlers {
   onCopy: (text: string) => void
   onOpenDocument: (relPath: string) => void
   onOpenExternal: (url: string) => void
-  onMigrate: () => void
   onHit: (delta: number) => void
 }
 
@@ -19,12 +18,10 @@ export interface ReaderState {
   query: string
   hit: number
   hitCount: number
-  coverage: Coverage | null
   failure: Problem | null
   loading: boolean
   canPrev: boolean
   canNext: boolean
-  migrating: boolean
 }
 
 export function renderReader(host: HTMLElement, state: ReaderState, handlers: ReaderHandlers): void {
@@ -39,14 +36,11 @@ export function renderReader(host: HTMLElement, state: ReaderState, handlers: Re
   }
 
   if (state.document === null) {
-    host.replaceChildren(bar(state, handlers), welcome(state, handlers))
+    host.replaceChildren(bar(state, handlers), welcome())
     return
   }
 
   const parts: HTMLElement[] = [bar(state, handlers)]
-  if (state.coverage !== null && state.coverage.entriesWithDoc < state.coverage.entryCount) {
-    parts.push(coverageBanner(state, handlers))
-  }
   parts.push(header(state.document))
   parts.push(body(state, handlers))
   parts.push(footer(state, handlers))
@@ -90,38 +84,6 @@ function iconAction(
   button.append(icon(name, 14))
   button.addEventListener('click', onClick)
   return button
-}
-
-function coverageBanner(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
-  const coverage = state.coverage
-  const banner = element('div', 'banner banner--quiet coverage')
-  const text = element('div', 'coverage-text')
-  const covered = coverage?.entriesWithDoc ?? 0
-  const total = coverage?.entryCount ?? 0
-  text.append(element('div', 'coverage-line', `${covered} de ${total} entradas tienen nota`))
-
-  const track = element('div', 'meter-track')
-  const fill = element('div', 'meter-fill')
-  fill.style.width = `${total === 0 ? 0 : Math.max(1, Math.round((covered / total) * 100))}%`
-  track.append(fill)
-  text.append(track)
-  text.append(
-    element(
-      'div',
-      'coverage-note',
-      'Las notas nacen con el cronómetro. Lo medido antes no las tiene.',
-    ),
-  )
-  banner.append(text)
-
-  const migrate = document.createElement('button')
-  migrate.type = 'button'
-  migrate.className = 'ghost-button'
-  migrate.textContent = state.migrating ? 'Migrando…' : 'Migrar las viejas'
-  migrate.disabled = state.migrating
-  migrate.addEventListener('click', handlers.onMigrate)
-  banner.append(migrate)
-  return banner
 }
 
 function header(entry: NoteDocument): HTMLElement {
@@ -286,9 +248,8 @@ function gone(path: string): HTMLElement {
   return box
 }
 
-function welcome(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
+function welcome(): HTMLElement {
   const wrap = element('div', 'reader-welcome')
-  if (state.coverage !== null) wrap.append(coverageBanner(state, handlers))
   const empty = element('div', 'empty')
   empty.append(element('div', 'empty-title', 'Elige una nota'))
   empty.append(

@@ -8,6 +8,7 @@ export const NOTES_FOCUS_EVENT = 'bita://notes-focus'
 export type ProblemKind =
   | 'node-missing'
   | 'cli-missing'
+  | 'cli-too-old'
   | 'schema-mismatch'
   | 'cli-failed'
   | 'unreadable'
@@ -367,10 +368,6 @@ export function notesSearch(
   project: string | null,
 ): Promise<CliPayload<SearchHit[], SearchMeta>> {
   return invoke('notes_search', { query, project })
-}
-
-export function notesMigrate(): Promise<CliPayload<unknown, unknown>> {
-  return invoke('notes_migrate')
 }
 
 export function openDocument(relPath: string): Promise<void> {

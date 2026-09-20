@@ -1,7 +1,7 @@
 pub mod node;
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use std::{env, fs};
@@ -95,21 +95,6 @@ impl Cli {
         })
     }
 
-    pub async fn call_slow<T: DeserializeOwned>(
-        &self,
-        args: &[&str],
-        limit: Duration,
-    ) -> Result<(T, serde_json::Value), Problem> {
-        let (data, meta) = self.envelope_with_meta_within::<T>(args, limit).await?;
-        let data = data.ok_or_else(|| {
-            Problem::new(
-                ProblemKind::Unreadable,
-                "La respuesta del CLI venía sin datos.",
-            )
-        })?;
-        Ok((data, meta))
-    }
-
     pub async fn run(&self, args: &[&str]) -> Result<(), Problem> {
         self.envelope::<serde_json::Value>(args).await.map(|_| ())
     }
@@ -136,14 +121,6 @@ impl Cli {
         &self,
         args: &[&str],
     ) -> Result<(Option<T>, serde_json::Value), Problem> {
-        self.envelope_with_meta_within::<T>(args, CALL_TIMEOUT).await
-    }
-
-    async fn envelope_with_meta_within<T: DeserializeOwned>(
-        &self,
-        args: &[&str],
-        limit: Duration,
-    ) -> Result<(Option<T>, serde_json::Value), Problem> {
         let mut command = Command::new(&self.node);
         command
             .arg(&self.entry)
@@ -167,12 +144,12 @@ impl Cli {
             command.env("HOME", home);
         }
 
-        let output = timeout(limit, command.output())
+        let output = timeout(CALL_TIMEOUT, command.output())
             .await
             .map_err(|_| {
                 Problem::new(
                     ProblemKind::CliFailed,
-                    format!("El CLI no respondió en {} s.", limit.as_secs()),
+                    format!("El CLI no respondió en {} s.", CALL_TIMEOUT.as_secs()),
                 )
             })?
             .map_err(|error| {
@@ -275,6 +252,23 @@ fn bin_directories() -> Vec<PathBuf> {
 
 fn canonical(path: PathBuf) -> PathBuf {
     fs::canonicalize(&path).unwrap_or(path)
+}
+
+pub fn version_of(node: &Path, entry: &Path) -> Option<String> {
+    let output = std::process::Command::new(node)
+        .arg(entry)
+        .arg("--version")
+        .current_dir("/")
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let first = text.lines().next()?.trim();
+    if first.is_empty() {
+        return None;
+    }
+    Some(first.to_string())
 }
 
 pub fn docs_root() -> PathBuf {

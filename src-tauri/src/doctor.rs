@@ -42,6 +42,40 @@ pub struct Report {
     pub blocked: bool,
 }
 
+const MIN_CLI: &str = "0.3.0";
+
+fn parts(version: &str) -> Vec<u32> {
+    version
+        .trim()
+        .trim_start_matches('v')
+        .split('.')
+        .map(|piece| {
+            piece
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+fn is_older(found: &str, wanted: &str) -> bool {
+    if !found.chars().any(|piece| piece.is_ascii_digit()) {
+        return false;
+    }
+    let found = parts(found);
+    let wanted = parts(wanted);
+    for index in 0..wanted.len().max(found.len()) {
+        let left = found.get(index).copied().unwrap_or(0);
+        let right = wanted.get(index).copied().unwrap_or(0);
+        if left != right {
+            return left < right;
+        }
+    }
+    false
+}
+
 pub async fn report(app: &AppHandle) -> Report {
     let mut checks = Vec::new();
     let mut blocked = false;
@@ -77,13 +111,42 @@ pub async fn report(app: &AppHandle) -> Report {
     let source = cli::resolve_entry(app);
     let can_install = matches!(source, Some((_, Source::Bundled))) && !blocked;
     match source.as_ref() {
-        Some((path, Source::Installed)) => checks.push(Check {
-            id: "cli".into(),
-            health: Health::Ok,
-            title: "El CLI de bita, instalado".into(),
-            detail: path.display().to_string(),
-            note: None,
-        }),
+        Some((path, Source::Installed)) => {
+            let found = node
+                .as_ref()
+                .map(|node| cli::version_of(node, path))
+                .unwrap_or(None);
+            let stale = found
+                .as_deref()
+                .map(|value| is_older(value, MIN_CLI))
+                .unwrap_or(false);
+
+            checks.push(if stale {
+                Check {
+                    id: "cli".into(),
+                    health: Health::Warn,
+                    title: format!(
+                        "El CLI instalado es la {}, y las notas piden la {MIN_CLI}",
+                        found.clone().unwrap_or_default()
+                    ),
+                    detail: path.display().to_string(),
+                    note: Some(
+                        "Instálalo de nuevo aquí abajo para dejar la copia que trae la app.".into(),
+                    ),
+                }
+            } else {
+                Check {
+                    id: "cli".into(),
+                    health: Health::Ok,
+                    title: match found.as_deref() {
+                        Some(value) => format!("El CLI de bita {value}, instalado"),
+                        None => "El CLI de bita, instalado".into(),
+                    },
+                    detail: path.display().to_string(),
+                    note: None,
+                }
+            });
+        }
         Some((path, Source::Bundled)) => checks.push(Check {
             id: "cli".into(),
             health: Health::Warn,
@@ -261,4 +324,25 @@ fn which(program: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_older;
+
+    #[test]
+    fn compares_versions_piece_by_piece() {
+        assert!(is_older("0.2.0", "0.3.0"));
+        assert!(is_older("0.2.9", "0.3.0"));
+        assert!(!is_older("0.3.0", "0.3.0"));
+        assert!(!is_older("0.3.1", "0.3.0"));
+        assert!(!is_older("1.0.0", "0.3.0"));
+    }
+
+    #[test]
+    fn survives_a_version_it_cannot_read() {
+        assert!(!is_older("", "0.3.0"));
+        assert!(!is_older("bita 0.3.0", "0.3.0"));
+        assert!(is_older("v0.2", "0.3.0"));
+    }
 }
