@@ -185,3 +185,8 @@ pub async fn install_cli(app: AppHandle) -> Result<String, Problem> {
     state.refresh(&app).await;
     Ok(log)
 }
+
+#[tauri::command]
+pub fn quit(app: AppHandle) {
+    app.exit(0);
+}

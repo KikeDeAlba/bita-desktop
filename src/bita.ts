@@ -165,6 +165,10 @@ export function installCli(): Promise<string> {
   return invoke<string>('install_cli')
 }
 
+export function quit(): Promise<void> {
+  return invoke<void>('quit')
+}
+
 export function onSnapshot(handler: (value: Snapshot) => void): void {
   void listen<Snapshot>(SNAPSHOT_EVENT, (event) => {
     handler(event.payload)
