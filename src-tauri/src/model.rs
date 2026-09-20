@@ -177,3 +177,54 @@ pub struct Scope {
     pub project_name: String,
     pub slug_source: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Entry, Envelope, SUPPORTED_SCHEMA};
+
+    const RUNNING: &str = r#"{"schemaVersion":3,"ok":true,"command":"current","generatedAt":"2026-09-20T06:41:57.412Z","meta":{"runningCount":1},"data":[{"id":733,"externalId":null,"description":"Cognito developers: MFA y caducidad","projectId":222494997,"projectName":"Pharma STI","clientName":null,"billable":false,"registered":false,"issueKey":null,"start":"2026-09-20T05:48:20.380Z","stop":null,"startLocal":"2026-09-19T22:48:20-07:00","localDay":"2026-09-19","durationSeconds":3217,"durationHuman":"54m","durationHours":0.89,"startedJira":"2026-09-19T22:48:20.380-0700","running":true}]}"#;
+
+    const REFUSED: &str = r#"{"schemaVersion":3,"ok":false,"command":"error","generatedAt":"2026-09-20T06:42:07.162Z","error":{"code":"REPO_NOT_MAPPED","message":"No project resolves for the repository.","hint":"bita repo init"}}"#;
+
+    const USAGE: &str = r#"{"schemaVersion":3,"ok":false,"command":"error","generatedAt":"2026-09-20T06:42:07.162Z","error":{"code":"USAGE_ERROR","message":"Unknown command."}}"#;
+
+    #[test]
+    fn reads_a_running_timer_out_of_a_real_envelope() {
+        let envelope: Envelope<Vec<Entry>> = serde_json::from_str(RUNNING).expect("parse");
+        assert!(envelope.ok);
+        assert_eq!(envelope.schema_version, SUPPORTED_SCHEMA);
+        let entries = envelope.data.expect("data");
+        let entry = entries.first().expect("one entry");
+        assert_eq!(entry.id, 733);
+        assert_eq!(entry.project_name.as_deref(), Some("Pharma STI"));
+        assert!(entry.running);
+        assert!(!entry.is_draft());
+        assert!(envelope.meta.is_some());
+    }
+
+    #[test]
+    fn a_refusal_carries_its_code_and_its_hint() {
+        let envelope: Envelope<serde_json::Value> = serde_json::from_str(REFUSED).expect("parse");
+        assert!(!envelope.ok);
+        assert!(envelope.data.is_none());
+        let error = envelope.error.expect("error");
+        assert_eq!(error.code, "REPO_NOT_MAPPED");
+        assert_eq!(error.hint.as_deref(), Some("bita repo init"));
+    }
+
+    #[test]
+    fn a_refusal_without_a_hint_still_parses() {
+        let envelope: Envelope<serde_json::Value> = serde_json::from_str(USAGE).expect("parse");
+        let error = envelope.error.expect("error");
+        assert_eq!(error.code, "USAGE_ERROR");
+        assert!(error.hint.is_none());
+    }
+
+    #[test]
+    fn an_empty_description_is_a_draft() {
+        let envelope: Envelope<Vec<Entry>> = serde_json::from_str(RUNNING).expect("parse");
+        let mut entry = envelope.data.expect("data").remove(0);
+        entry.description = "   ".into();
+        assert!(entry.is_draft());
+    }
+}
