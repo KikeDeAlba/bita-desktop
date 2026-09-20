@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::cli::Source;
-use crate::model::{Problem, Snapshot};
+use crate::model::{Problem, Scope, SummaryData, SummaryMeta, SummaryView, Snapshot};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,4 +112,61 @@ async fn act(app: AppHandle, args: Vec<String>) -> Result<Snapshot, Problem> {
     cli.run(&borrowed).await?;
     state.refresh(&app).await;
     Ok(state.snapshot(Utc::now()))
+}
+
+async fn summary_view(app: &AppHandle, args: &[&str]) -> Result<SummaryView, Problem> {
+    let cli = app.state::<AppState>().require_cli(app).await?;
+    let (data, meta) = cli.call_with_meta::<SummaryData>(args).await?;
+    let meta: SummaryMeta = serde_json::from_value(meta).unwrap_or_default();
+    let estimate_seconds = data.groups.iter().map(|group| group.estimate_seconds).sum();
+
+    Ok(SummaryView {
+        total_seconds: data.total_seconds,
+        total_human: data.total_human,
+        estimate_seconds,
+        groups: data.groups,
+        overlaps: meta.overlaps,
+        excluded: meta.excluded,
+    })
+}
+
+#[tauri::command]
+pub async fn worked(app: AppHandle, range: String) -> Result<SummaryView, Problem> {
+    let range = match range.as_str() {
+        "week" => "week",
+        _ => "today",
+    };
+    summary_view(&app, &["summary", range, "--include-running"]).await
+}
+
+#[tauri::command]
+pub async fn pending(app: AppHandle) -> Result<SummaryView, Problem> {
+    summary_view(&app, &["summary", "--pending"]).await
+}
+
+#[tauri::command]
+pub async fn scopes(app: AppHandle) -> Result<Vec<Scope>, Problem> {
+    let cli = app.state::<AppState>().require_cli(&app).await?;
+    cli.call(&["scope", "list"]).await
+}
+
+#[tauri::command]
+pub async fn add_project(app: AppHandle, name: String) -> Result<Vec<Project>, Problem> {
+    let cli = app.state::<AppState>().require_cli(&app).await?;
+    cli.run(&["project", "add", name.trim()]).await?;
+    cli.call(&["projects"]).await
+}
+
+#[tauri::command]
+pub async fn set_scope(app: AppHandle, prefix: String, project: String) -> Result<Vec<Scope>, Problem> {
+    let cli = app.state::<AppState>().require_cli(&app).await?;
+    cli.run(&["scope", "set", prefix.trim(), project.trim()]).await?;
+    cli.call(&["scope", "list"]).await
+}
+
+#[tauri::command]
+pub async fn unset_scope(app: AppHandle, prefix: String) -> Result<Vec<Scope>, Problem> {
+    let cli = app.state::<AppState>().require_cli(&app).await?;
+    cli.run(&["scope", "unset", prefix.trim()]).await?;
+    cli.call(&["scope", "list"]).await
 }
