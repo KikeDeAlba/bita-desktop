@@ -93,6 +93,7 @@ pub struct Problem {
 pub enum ProblemKind {
     NodeMissing,
     CliMissing,
+    CliTooOld,
     SchemaMismatch,
     CliFailed,
     Unreadable,

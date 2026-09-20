@@ -8,6 +8,7 @@ export const NOTES_FOCUS_EVENT = 'bita://notes-focus'
 export type ProblemKind =
   | 'node-missing'
   | 'cli-missing'
+  | 'cli-too-old'
   | 'schema-mismatch'
   | 'cli-failed'
   | 'unreadable'

@@ -1,7 +1,7 @@
 pub mod node;
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 use std::{env, fs};
@@ -275,6 +275,23 @@ fn bin_directories() -> Vec<PathBuf> {
 
 fn canonical(path: PathBuf) -> PathBuf {
     fs::canonicalize(&path).unwrap_or(path)
+}
+
+pub fn version_of(node: &Path, entry: &Path) -> Option<String> {
+    let output = std::process::Command::new(node)
+        .arg(entry)
+        .arg("--version")
+        .current_dir("/")
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let first = text.lines().next()?.trim();
+    if first.is_empty() {
+        return None;
+    }
+    Some(first.to_string())
 }
 
 pub fn docs_root() -> PathBuf {

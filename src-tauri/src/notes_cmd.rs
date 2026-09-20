@@ -11,6 +11,7 @@ use crate::state::AppState;
 
 const MIGRATE_TIMEOUT: Duration = Duration::from_secs(120);
 const OPEN: &str = "/usr/bin/open";
+const MIN_CLI: &str = "0.3.0";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,8 +22,24 @@ pub struct CliPayload {
 
 async fn payload(app: &AppHandle, args: &[&str]) -> Result<CliPayload, Problem> {
     let handle = app.state::<AppState>().require_cli(app).await?;
-    let (data, meta) = handle.call_with_meta::<serde_json::Value>(args).await?;
+    let (data, meta) = handle
+        .call_with_meta::<serde_json::Value>(args)
+        .await
+        .map_err(stale_cli)?;
     Ok(CliPayload { data, meta })
+}
+
+fn stale_cli(problem: Problem) -> Problem {
+    if !problem.message.contains("Unknown command") {
+        return problem;
+    }
+    Problem::new(
+        ProblemKind::CliTooOld,
+        format!("El CLI de bita es anterior a la {MIN_CLI} y no sabe leer documentos."),
+    )
+    .with_hint(Some(
+        "Actualízalo desde Ajustes. Si lo tienes enlazado a un clon, actualiza ese clon.".into(),
+    ))
 }
 
 #[tauri::command]
@@ -85,7 +102,8 @@ pub async fn notes_migrate(app: AppHandle) -> Result<CliPayload, Problem> {
     let handle = app.state::<AppState>().require_cli(&app).await?;
     let (data, meta) = handle
         .call_slow::<serde_json::Value>(&["notes", "migrate"], MIGRATE_TIMEOUT)
-        .await?;
+        .await
+        .map_err(stale_cli)?;
     Ok(CliPayload { data, meta })
 }
 
@@ -186,7 +204,30 @@ fn inside_docs_root(rel_path: &str) -> Result<PathBuf, Problem> {
 
 #[cfg(test)]
 mod tests {
-    use super::inside_docs_root;
+    use super::{inside_docs_root, stale_cli};
+    use crate::model::{Problem, ProblemKind};
+
+    #[test]
+    fn an_unknown_command_reads_as_a_stale_cli() {
+        let raw = Problem::new(
+            ProblemKind::CliFailed,
+            "Unknown command \"docs\". Run \"bita --help\" for the list. (USAGE_ERROR)",
+        );
+        let mapped = stale_cli(raw);
+
+        assert_eq!(mapped.kind, ProblemKind::CliTooOld);
+        assert!(mapped.message.contains("0.3.0"));
+        assert!(mapped.hint.is_some());
+    }
+
+    #[test]
+    fn any_other_failure_is_left_alone() {
+        let raw = Problem::new(ProblemKind::CliFailed, "No entry #999. (USAGE_ERROR)");
+        let mapped = stale_cli(raw);
+
+        assert_eq!(mapped.kind, ProblemKind::CliFailed);
+        assert_eq!(mapped.message, "No entry #999. (USAGE_ERROR)");
+    }
 
     #[test]
     fn an_absolute_path_is_refused() {
