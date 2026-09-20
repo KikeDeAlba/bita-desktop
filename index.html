@@ -34,6 +34,25 @@
       </nav>
 
       <main class="view" id="view"></main>
+
+      <footer class="launcher" id="launcher">
+        <form class="launcher-row" id="launch-form">
+          <label class="visually-hidden" for="launch-title">Título del cronómetro</label>
+          <input
+            id="launch-title"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="¿En qué trabajas?"
+          />
+          <button type="submit" class="go" aria-label="Arrancar">
+            <svg width="13" height="13" viewBox="0 0 12 12" aria-hidden="true">
+              <path d="M3.6 2.4 9.4 6 3.6 9.6Z" fill="currentColor" />
+            </svg>
+          </button>
+        </form>
+        <button type="button" class="quiet-link" id="launch-blank">o arranca en blanco</button>
+      </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

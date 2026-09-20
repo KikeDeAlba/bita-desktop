@@ -146,6 +146,10 @@ impl AppState {
         inner.problem = None;
     }
 
+    pub async fn require_cli(&self, app: &AppHandle) -> Result<Cli, Problem> {
+        self.ensure_cli(app).await
+    }
+
     async fn ensure_cli(&self, app: &AppHandle) -> Result<Cli, Problem> {
         let existing = self.cli.lock().expect("state poisoned").clone();
         if let Some(cli) = existing {

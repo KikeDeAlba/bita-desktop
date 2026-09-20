@@ -85,6 +85,19 @@ impl Cli {
     }
 
     pub async fn call<T: DeserializeOwned>(&self, args: &[&str]) -> Result<T, Problem> {
+        self.envelope::<T>(args).await?.ok_or_else(|| {
+            Problem::new(
+                ProblemKind::Unreadable,
+                "La respuesta del CLI venía sin datos.",
+            )
+        })
+    }
+
+    pub async fn run(&self, args: &[&str]) -> Result<(), Problem> {
+        self.envelope::<serde_json::Value>(args).await.map(|_| ())
+    }
+
+    async fn envelope<T: DeserializeOwned>(&self, args: &[&str]) -> Result<Option<T>, Problem> {
         let mut command = Command::new(&self.node);
         command
             .arg(&self.entry)
@@ -165,12 +178,7 @@ impl Cli {
             );
         }
 
-        envelope.data.ok_or_else(|| {
-            Problem::new(
-                ProblemKind::Unreadable,
-                "La respuesta del CLI venía sin datos.",
-            )
-        })
+        Ok(envelope.data)
     }
 }
 
