@@ -11,6 +11,7 @@ const KEEP_OPEN_ENV: &str = "BITA_KEEP_PANEL";
 
 const GAP: f64 = 6.0;
 const EDGE_MARGIN: f64 = 8.0;
+const FALLBACK_MENU_BAR: f64 = 24.0;
 
 #[derive(Default)]
 pub struct TrayAnchor {
@@ -62,24 +63,36 @@ pub fn show(app: &AppHandle, window: &WebviewWindow) {
 }
 
 fn place(app: &AppHandle, window: &WebviewWindow) {
-    let Some(anchor) = app.state::<TrayAnchor>().recall() else {
-        return;
-    };
     let Ok(size) = window.outer_size() else {
         return;
     };
     let scale = window.scale_factor().unwrap_or(1.0);
+    let width = f64::from(size.width);
 
-    let mut x = anchor.center_x - f64::from(size.width) / 2.0;
-    let y = anchor.bottom_y + GAP * scale;
+    let monitor = window
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| window.primary_monitor().ok().flatten());
 
-    if let Ok(Some(monitor)) = window.current_monitor() {
-        let left = f64::from(monitor.position().x) + EDGE_MARGIN * scale;
-        let right = f64::from(monitor.position().x + monitor.size().width as i32)
-            - f64::from(size.width)
-            - EDGE_MARGIN * scale;
-        x = x.clamp(left, right.max(left));
-    }
+    let (screen_x, screen_y, screen_width) = match monitor.as_ref() {
+        Some(monitor) => (
+            f64::from(monitor.position().x),
+            f64::from(monitor.position().y),
+            f64::from(monitor.size().width),
+        ),
+        None => (0.0, 0.0, width),
+    };
+
+    let menu_bar = crate::screen::menu_bar_height().unwrap_or(FALLBACK_MENU_BAR);
+    let y = screen_y + (menu_bar + GAP) * scale;
+
+    let left = screen_x + EDGE_MARGIN * scale;
+    let right = (screen_x + screen_width - width - EDGE_MARGIN * scale).max(left);
+    let x = match app.state::<TrayAnchor>().recall() {
+        Some(anchor) => (anchor.center_x - width / 2.0).clamp(left, right),
+        None => right,
+    };
 
     let _ = window.set_position(PhysicalPosition::new(x, y));
 }
@@ -89,6 +102,9 @@ pub fn wire(app: &AppHandle) {
         return;
     };
     let hides_on_blur = env::var_os(KEEP_OPEN_ENV).is_none();
+    if !hides_on_blur {
+        show(app, &window);
+    }
     let target = window.clone();
     window.on_window_event(move |event| match event {
         WindowEvent::Focused(false) if hides_on_blur => {

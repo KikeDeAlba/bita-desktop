@@ -105,7 +105,7 @@ BITA_DB_PATH=/tmp/bita-dev.db pnpm tauri dev
 | `BITA_DB_PATH` | Usar otra base de datos |
 | `BITA_NODE` | Forzar un binario de node concreto |
 | `BITA_CLI` | Forzar un CLI concreto en vez de buscarlo |
-| `BITA_KEEP_PANEL` | Que el panel no se esconda al perder el foco, para poder usar las devtools |
+| `BITA_KEEP_PANEL` | Abre el panel al arrancar y evita que se esconda al perder el foco, para poder usar las devtools |
 
 ## Cómo habla con el CLI
 
@@ -150,6 +150,17 @@ deja el fichero intacto y toda escritura hace checkpoint al cerrar y mueve el
 
 Como red de seguridad hay además un sondeo cada treinta segundos, porque FSEvents
 pierde eventos cuando el equipo se suspende.
+
+## Dónde se coloca el panel
+
+La vertical **no** sale del rectángulo del icono del tray, sale de
+`NSScreen.visibleFrame`. La diferencia importa: en un MacBook con notch la barra
+de menús mide 39 pt en vez de los 24 de siempre, y colocar el panel contando 24
+lo mete media cabecera por debajo de la barra. `visibleFrame` es la única fuente
+que sabe cuánto mide de verdad.
+
+Del icono sale solo la horizontal, y va acotada a la pantalla para que un tray
+pegado al borde derecho no empuje el panel fuera.
 
 ## Estructura
 
