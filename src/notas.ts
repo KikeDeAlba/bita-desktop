@@ -27,6 +27,10 @@ const asideHost = must<HTMLElement>('#aside')
 
 const RAIL_KEY = 'bita.notes.rail'
 const ASIDE_KEY = 'bita.notes.aside'
+const SCALE_KEY = 'bita.notes.scale'
+const SCALE_MIN = 0.8
+const SCALE_MAX = 2
+const SCALE_STEP = 0.1
 
 let spaces: Space[] = []
 let pageCount = 0
@@ -44,6 +48,7 @@ let loadingDoc = false
 let railOpen = remembered(RAIL_KEY)
 let asideOpen = remembered(ASIDE_KEY)
 let logOpen = true
+let scale = rememberedScale()
 
 let railPainted = ''
 let readerPainted = ''
@@ -56,6 +61,26 @@ function remembered(key: string): boolean {
     return window.localStorage.getItem(key) !== 'closed'
   } catch {
     return true
+  }
+}
+
+function rememberedScale(): number {
+  try {
+    const stored = Number(window.localStorage.getItem(SCALE_KEY))
+    if (!Number.isFinite(stored) || stored <= 0) return 1
+    return Math.min(SCALE_MAX, Math.max(SCALE_MIN, stored))
+  } catch {
+    return 1
+  }
+}
+
+function applyScale(next: number): void {
+  scale = Math.min(SCALE_MAX, Math.max(SCALE_MIN, Math.round(next * 100) / 100))
+  must<HTMLElement>('#notas').style.setProperty('--doc-scale', String(scale))
+  try {
+    window.localStorage.setItem(SCALE_KEY, String(scale))
+  } catch {
+    return
   }
 }
 
@@ -445,6 +470,24 @@ function keys(event: KeyboardEvent): void {
     return
   }
 
+  if ((event.metaKey || event.ctrlKey) && (event.key === '=' || event.key === '+')) {
+    event.preventDefault()
+    applyScale(scale + SCALE_STEP)
+    return
+  }
+
+  if ((event.metaKey || event.ctrlKey) && (event.key === '-' || event.key === '_')) {
+    event.preventDefault()
+    applyScale(scale - SCALE_STEP)
+    return
+  }
+
+  if ((event.metaKey || event.ctrlKey) && event.key === '0') {
+    event.preventDefault()
+    applyScale(1)
+    return
+  }
+
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g') {
     event.preventDefault()
     moveHit(event.shiftKey ? -1 : 1)
@@ -475,6 +518,7 @@ function keys(event: KeyboardEvent): void {
 }
 
 async function start(): Promise<void> {
+  applyScale(scale)
   window.addEventListener('keydown', keys)
   onDocsChanged(() => {
     void loadTree()

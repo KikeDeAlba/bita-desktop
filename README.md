@@ -208,6 +208,17 @@ emite como párrafo literal: nunca se pierde contenido. Las tablas GFM salen com
 `<table>` de verdad por la misma vía, y cada celda pasa por el mismo paso en
 línea, así que los enlaces y el resaltado de la búsqueda funcionan dentro.
 
+## El tamaño del texto
+
+`cmd +` y `cmd -` agrandan y encogen **el documento**, no la ventana: los
+carriles conservan su densidad, que es donde se navega, y crece lo que se lee.
+`cmd 0` vuelve a 1. Va de 0.8 a 2 y se recuerda en `localStorage`.
+
+Es una variable CSS, `--doc-scale`, y las medidas del artículo son `em` sobre
+ella. No es el zoom del webview a propósito: ese escalaría también el árbol y el
+panel lateral, y entonces caben menos páginas en pantalla justo cuando querías
+leer más cómodo.
+
 ## Los diagramas
 
 Un cercado ` ```mermaid ` se dibuja con mermaid, que es **la única dependencia
