@@ -28,14 +28,17 @@ async fn payload(app: &AppHandle, args: &[&str]) -> Result<CliPayload, Problem> 
 }
 
 fn stale_cli(problem: Problem) -> Problem {
-    if !problem.message.contains("Unknown command") {
+    let message = if problem.message.contains("was written by a newer version") {
+        "La base de datos la escribió un bita más nuevo que el CLI instalado.".to_string()
+    } else if problem.message.contains("Unknown command")
+        || problem.message.contains("Usage: bita docs")
+    {
+        format!("El CLI de bita es anterior a la {MIN_CLI} y no sabe leer documentos.")
+    } else {
         return problem;
-    }
-    Problem::new(
-        ProblemKind::CliTooOld,
-        format!("El CLI de bita es anterior a la {MIN_CLI} y no sabe leer documentos."),
-    )
-    .with_hint(Some(
+    };
+
+    Problem::new(ProblemKind::CliTooOld, message).with_hint(Some(
         "Actualízalo desde Ajustes. Si lo tienes enlazado a un clon, actualiza ese clon.".into(),
     ))
 }
@@ -155,6 +158,23 @@ pub fn copy_text(text: String) -> Result<(), Problem> {
     ))
 }
 
+fn doc_shaped(rel_path: &str) -> Result<&Path, &'static str> {
+    let candidate = Path::new(rel_path);
+    if candidate.is_absolute() {
+        return Err("la ruta es absoluta");
+    }
+    if candidate
+        .components()
+        .any(|part| matches!(part, Component::ParentDir | Component::Prefix(_)))
+    {
+        return Err("la ruta sale del directorio");
+    }
+    if candidate.extension().and_then(|value| value.to_str()) != Some("md") {
+        return Err("no es un .md");
+    }
+    Ok(candidate)
+}
+
 fn inside_docs_root(rel_path: &str) -> Result<PathBuf, Problem> {
     let refused = |reason: &str| {
         Problem::new(
@@ -163,19 +183,7 @@ fn inside_docs_root(rel_path: &str) -> Result<PathBuf, Problem> {
         )
     };
 
-    let candidate = Path::new(rel_path);
-    if candidate.is_absolute() {
-        return Err(refused("la ruta es absoluta"));
-    }
-    if candidate
-        .components()
-        .any(|part| matches!(part, Component::ParentDir | Component::Prefix(_)))
-    {
-        return Err(refused("la ruta sale del directorio"));
-    }
-    if candidate.extension().and_then(|value| value.to_str()) != Some("md") {
-        return Err(refused("no es un .md"));
-    }
+    let candidate = doc_shaped(rel_path).map_err(refused)?;
 
     let root = cli::docs_root();
     let target = root.join(candidate);
@@ -192,7 +200,7 @@ fn inside_docs_root(rel_path: &str) -> Result<PathBuf, Problem> {
 
 #[cfg(test)]
 mod tests {
-    use super::{inside_docs_root, stale_cli};
+    use super::{doc_shaped, inside_docs_root, stale_cli, MIN_CLI};
     use crate::model::{Problem, ProblemKind};
 
     #[test]
@@ -204,7 +212,33 @@ mod tests {
         let mapped = stale_cli(raw);
 
         assert_eq!(mapped.kind, ProblemKind::CliTooOld);
-        assert!(mapped.message.contains("0.3.0"));
+        assert!(mapped.message.contains(MIN_CLI));
+        assert!(mapped.hint.is_some());
+    }
+
+    #[test]
+    fn an_unknown_docs_subcommand_reads_as_a_stale_cli() {
+        let raw = Problem::new(
+            ProblemKind::CliFailed,
+            "Usage: bita docs <tree|ls|show|search> (USAGE_ERROR)",
+        );
+        let mapped = stale_cli(raw);
+
+        assert_eq!(mapped.kind, ProblemKind::CliTooOld);
+        assert!(mapped.message.contains(MIN_CLI));
+        assert!(mapped.hint.is_some());
+    }
+
+    #[test]
+    fn a_database_from_the_future_reads_as_a_stale_cli() {
+        let raw = Problem::new(
+            ProblemKind::CliFailed,
+            "the database at /x/bita.db was written by a newer version (schema 4, this build understands 3) (UNEXPECTED_ERROR)",
+        );
+        let mapped = stale_cli(raw);
+
+        assert_eq!(mapped.kind, ProblemKind::CliTooOld);
+        assert!(mapped.message.contains("base de datos"));
         assert!(mapped.hint.is_some());
     }
 
@@ -215,6 +249,17 @@ mod tests {
 
         assert_eq!(mapped.kind, ProblemKind::CliFailed);
         assert_eq!(mapped.message, "No entry #999. (USAGE_ERROR)");
+    }
+
+    #[test]
+    fn a_nested_page_path_keeps_its_shape() {
+        assert!(doc_shaped("pharma-sti/bootstrap/credenciales-y-secretos.md").is_ok());
+        assert!(doc_shaped("pharma-sti/a/b/c/d/hondo.md").is_ok());
+    }
+
+    #[test]
+    fn climbing_out_from_a_nested_page_is_refused() {
+        assert!(doc_shaped("pharma-sti/bootstrap/../../../etc/passwd.md").is_err());
     }
 
     #[test]
