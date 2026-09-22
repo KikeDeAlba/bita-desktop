@@ -2,7 +2,6 @@ import {
   copyText,
   describeProblem,
   notesDocument,
-  notesList,
   notesSearch,
   notesTakeFocus,
   notesTree,
@@ -10,59 +9,82 @@ import {
   onNotesFocus,
   openDocument,
   openExternal,
-  type NoteDocument,
-  type NoteRow,
+  pageDocument,
+  type PageDocument,
+  type PageNode,
   type Problem,
   type SearchHit,
-  type TreeProject,
+  type Space,
 } from './bita.ts'
 import { must } from './dom.ts'
-import { renderRail, type RailState } from './notes/rail.ts'
+import { renderAside, type AsideState } from './notes/aside.ts'
+import { renderRail, pageKey, spaceKey, type RailState, type Selection } from './notes/rail.ts'
 import { renderReader, type ReaderState } from './notes/reader.ts'
-import { FALLBACK_SECTIONS } from './notes/sections.ts'
 
 const railHost = must<HTMLElement>('#rail')
 const readerHost = must<HTMLElement>('#reader')
+const asideHost = must<HTMLElement>('#aside')
 
-let projects: TreeProject[] = []
-let docCount = 0
-let sections: readonly string[] = FALLBACK_SECTIONS
-let rows = new Map<string, NoteRow[]>()
+const RAIL_KEY = 'bita.notes.rail'
+const ASIDE_KEY = 'bita.notes.aside'
+
+let spaces: Space[] = []
+let pageCount = 0
 let expanded = new Set<string>()
-let selected: number | null = null
-let opened: NoteDocument | null = null
+let selected: Selection = null
+let opened: PageDocument | null = null
 let query = ''
 let results: SearchHit[] | null = null
 let hit = 0
 let hitCount = 0
+let active: string | null = null
 let failure: Problem | null = null
 let loadingTree = true
 let loadingDoc = false
+let railOpen = remembered(RAIL_KEY)
+let asideOpen = remembered(ASIDE_KEY)
+let logOpen = true
 
 let railPainted = ''
 let readerPainted = ''
+let asidePainted = ''
 let searchToken = 0
 let spy: IntersectionObserver | null = null
 
+function remembered(key: string): boolean {
+  try {
+    return window.localStorage.getItem(key) !== 'closed'
+  } catch {
+    return true
+  }
+}
+
+function remember(key: string, open: boolean): void {
+  try {
+    window.localStorage.setItem(key, open ? 'open' : 'closed')
+  } catch {
+    return
+  }
+}
+
 function railState(): RailState {
   return {
-    projects,
-    rows,
+    spaces,
     expanded,
     selected,
     query,
     results,
-    docCount,
+    pageCount,
     loading: loadingTree,
+    open: railOpen,
   }
 }
 
 function readerState(): ReaderState {
   const order = flatOrder()
-  const at = selected === null ? -1 : order.indexOf(selected)
+  const at = selected?.kind === 'page' ? order.indexOf(selected.id) : -1
   return {
-    document: opened,
-    sections,
+    page: opened,
     query,
     hit,
     hitCount,
@@ -70,33 +92,53 @@ function readerState(): ReaderState {
     loading: loadingDoc,
     canPrev: at > 0,
     canNext: at !== -1 && at < order.length - 1,
+    railOpen,
+    asideOpen,
   }
 }
 
+function asideState(): AsideState {
+  return { page: opened, active, open: asideOpen, logOpen, onToggleLog: toggleLog }
+}
+
 function railSignature(): string {
-  const loaded = [...rows.entries()].map(([slug, list]) => `${slug}:${list.length}`).join(',')
   return [
-    projects.length,
-    docCount,
+    spaces.map((space) => `${space.projectSlug}:${space.pageCount}`).join(','),
+    pageCount,
     [...expanded].sort().join('|'),
-    loaded,
-    selected ?? 'none',
+    selected === null ? 'none' : `${selected.kind}:${selected.id}`,
     query,
     results === null ? 'pending' : results.map((entry) => entry.entryId).join('.'),
     loadingTree,
+    railOpen,
   ].join('~')
 }
 
 function readerSignature(): string {
   return [
-    selected ?? 'none',
-    opened?.doc?.relPath ?? 'none',
-    opened?.doc?.file.status ?? 'none',
+    selected === null ? 'none' : `${selected.kind}:${selected.id}`,
+    opened?.doc.relPath ?? 'none',
+    opened?.doc.file.status ?? 'none',
+    opened?.recordedAt ?? '',
     query,
     hit,
     hitCount,
     failure?.message ?? '',
     loadingDoc,
+    railOpen,
+    asideOpen,
+  ].join('~')
+}
+
+function asideSignature(): string {
+  return [
+    opened?.pageId ?? 'none',
+    opened?.recordedAt ?? '',
+    opened?.entries.length ?? 0,
+    opened?.issues.map((issue) => `${issue.issueKey}:${issue.statusCategory}`).join(',') ?? '',
+    active ?? '',
+    asideOpen,
+    logOpen,
   ].join('~')
 }
 
@@ -106,8 +148,10 @@ function paint(): void {
     railPainted = rail
     renderRail(railHost, railState(), {
       onQuery: runQuery,
-      onToggle: toggleProject,
-      onSelect: select,
+      onToggle: toggleNode,
+      onSelectPage: selectPage,
+      onSelectEntry: openEntryDocument,
+      onCollapse: () => setRail(false),
     })
   }
 
@@ -125,9 +169,44 @@ function paint(): void {
         void openExternal(url).catch(showFailure)
       },
       onHit: moveHit,
+      onCrumb: selectPage,
+      onExpandRail: () => setRail(true),
+      onExpandAside: () => setAside(true),
     })
     afterReaderPaint()
   }
+
+  const aside = asideSignature()
+  if (aside !== asidePainted) {
+    asidePainted = aside
+    renderAside(asideHost, asideState(), {
+      onHeading: scrollToHeading,
+      onIssue: (url) => {
+        void openExternal(url).catch(showFailure)
+      },
+      onChild: selectPage,
+      onEntry: openEntryDocument,
+      onCollapse: () => setAside(false),
+      onExpand: () => setAside(true),
+    })
+  }
+}
+
+function setRail(open: boolean): void {
+  railOpen = open
+  remember(RAIL_KEY, open)
+  paint()
+}
+
+function setAside(open: boolean): void {
+  asideOpen = open
+  remember(ASIDE_KEY, open)
+  paint()
+}
+
+function toggleLog(): void {
+  logOpen = !logOpen
+  paint()
 }
 
 function afterReaderPaint(): void {
@@ -157,10 +236,18 @@ function moveHit(delta: number): void {
   if (label) label.textContent = `${hit + 1} / ${hitCount}`
 }
 
+function scrollToHeading(anchor: string): void {
+  const target = readerHost.querySelector<HTMLElement>(`#${CSS.escape(anchor)}`)
+  target?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+}
+
 function watchSections(): void {
   spy?.disconnect()
   const blocks = [...readerHost.querySelectorAll<HTMLElement>('.doc-section[data-heading]')]
-  if (blocks.length === 0) return
+  if (blocks.length === 0) {
+    active = null
+    return
+  }
 
   spy = new IntersectionObserver(
     (entries) => {
@@ -168,30 +255,39 @@ function watchSections(): void {
         .filter((entry) => entry.isIntersecting)
         .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top)[0]
       if (!visible) return
-      const heading = (visible.target as HTMLElement).dataset['heading'] ?? ''
-      for (const item of readerHost.querySelectorAll<HTMLElement>('.toc-item')) {
-        const on = item.dataset['heading'] === heading
-        item.classList.toggle('toc-item--on', on)
-        if (on) item.setAttribute('aria-current', 'true')
-        else item.removeAttribute('aria-current')
-      }
+      const anchor = (visible.target as HTMLElement).id
+      if (anchor === active) return
+      active = anchor
+      paint()
     },
     { root: readerHost.querySelector('.doc-body'), rootMargin: '-10% 0px -70% 0px' },
   )
   for (const block of blocks) spy.observe(block)
 }
 
-function flatOrder(): number[] {
-  if (query.trim().length > 0 && results !== null) {
-    return results.map((entry) => entry.entryId)
-  }
-
-  const order: number[] = []
-  for (const project of projects) {
-    if (!expanded.has(project.projectSlug)) continue
-    for (const entry of rows.get(project.projectSlug) ?? []) {
-      if (entry.doc !== null) order.push(entry.entryId)
+function allPages(): PageNode[] {
+  const flat: PageNode[] = []
+  const walk = (list: PageNode[]): void => {
+    for (const page of list) {
+      flat.push(page)
+      walk(page.children ?? [])
     }
+  }
+  for (const space of spaces) walk(space.pages)
+  return flat
+}
+
+function flatOrder(): number[] {
+  const order: number[] = []
+  const walk = (list: PageNode[]): void => {
+    for (const page of list) {
+      order.push(page.pageId)
+      if (expanded.has(pageKey(page))) walk(page.children ?? [])
+    }
+  }
+  for (const space of spaces) {
+    if (!expanded.has(spaceKey(space))) continue
+    walk(space.pages)
   }
   return order
 }
@@ -199,57 +295,76 @@ function flatOrder(): number[] {
 function step(delta: number): void {
   const order = flatOrder()
   if (order.length === 0) return
-  const at = selected === null ? -1 : order.indexOf(selected)
+  const at = selected?.kind === 'page' ? order.indexOf(selected.id) : -1
   const next = order[at === -1 ? 0 : Math.min(order.length - 1, Math.max(0, at + delta))]
-  if (next !== undefined && next !== selected) select(next)
+  if (next !== undefined && next !== selected?.id) selectPage(next)
 }
 
-function select(entryId: number): void {
-  selected = entryId
+function selectPage(pageId: number): void {
+  selected = { kind: 'page', id: pageId }
   hit = 0
+  active = null
+  revealAncestors(pageId)
   paint()
-  void loadDocument(entryId)
+  void loadPage(pageId)
 }
 
-async function loadDocument(entryId: number): Promise<void> {
+function revealAncestors(pageId: number): void {
+  const byId = new Map(allPages().map((page) => [page.pageId, page]))
+  let cursor = byId.get(pageId)
+  const space = spaces.find((candidate) => candidate.projectId === cursor?.projectId)
+  if (space) expanded.add(spaceKey(space))
+
+  while (cursor?.parentId != null) {
+    const parent = byId.get(cursor.parentId)
+    if (!parent) break
+    expanded.add(pageKey(parent))
+    cursor = parent
+  }
+}
+
+async function loadPage(pageId: number): Promise<void> {
   loadingDoc = true
   failure = null
   paint()
 
   try {
-    const payload = await notesDocument(entryId)
-    if (selected !== entryId) return
+    const payload = await pageDocument(pageId)
+    if (selected?.kind !== 'page' || selected.id !== pageId) return
     opened = payload.data
-    if (payload.meta.sections?.length) sections = payload.meta.sections
     loadingDoc = false
   } catch (error) {
-    if (selected !== entryId) return
+    if (selected?.kind !== 'page' || selected.id !== pageId) return
     loadingDoc = false
     failure = describeProblem(error)
   }
   paint()
 }
 
-function toggleProject(slug: string): void {
-  if (expanded.has(slug)) expanded.delete(slug)
-  else {
-    expanded.add(slug)
-    if (!rows.has(slug)) void loadProject(slug)
-  }
-  paint()
+function openEntryDocument(entryId: number): void {
+  void (async () => {
+    try {
+      const payload = await notesDocument(entryId)
+      const relPath = payload.data.doc?.relPath
+      if (relPath === undefined) {
+        failure = {
+          kind: 'unreadable',
+          message: 'Ese bloque no dejó un documento propio.',
+          hint: 'Lo que se hizo está en el registro de la página.',
+        }
+        paint()
+        return
+      }
+      await openDocument(relPath)
+    } catch (error) {
+      showFailure(error)
+    }
+  })()
 }
 
-async function loadProject(slug: string): Promise<void> {
-  const project = projects.find((entry) => entry.projectSlug === slug)
-  const name = project?.projectId === null ? '_no-project' : (project?.projectName ?? null)
-
-  try {
-    const payload = await notesList(name, 0, 0)
-    rows.set(slug, payload.data)
-  } catch (error) {
-    rows.set(slug, [])
-    failure = describeProblem(error)
-  }
+function toggleNode(key: string): void {
+  if (expanded.has(key)) expanded.delete(key)
+  else expanded.add(key)
   paint()
 }
 
@@ -299,9 +414,12 @@ async function loadTree(): Promise<void> {
   loadingTree = true
   try {
     const payload = await notesTree()
-    projects = payload.data.projects
-    docCount = payload.meta.totals.docCount
-    if (payload.meta.sections?.length) sections = payload.meta.sections
+    spaces = payload.data.spaces ?? []
+    pageCount = spaces.reduce((total, space) => total + space.pageCount, 0)
+    if (expanded.size === 0) {
+      const first = spaces.find((space) => space.pageCount > 0)
+      if (first) expanded.add(spaceKey(first))
+    }
     failure = null
   } catch (error) {
     failure = describeProblem(error)
@@ -310,12 +428,8 @@ async function loadTree(): Promise<void> {
   paint()
 }
 
-async function focusOn(entryId: number): Promise<void> {
-  const project = projects.find((entry) =>
-    (rows.get(entry.projectSlug) ?? []).some((row) => row.entryId === entryId),
-  )
-  if (project) expanded.add(project.projectSlug)
-  select(entryId)
+function focusOnPage(pageId: number): void {
+  if (allPages().some((page) => page.pageId === pageId)) selectPage(pageId)
 }
 
 function keys(event: KeyboardEvent): void {
@@ -324,6 +438,7 @@ function keys(event: KeyboardEvent): void {
 
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
     event.preventDefault()
+    if (!railOpen) setRail(true)
     const input = railHost.querySelector<HTMLInputElement>('#rail-query')
     input?.focus()
     input?.select()
@@ -362,19 +477,18 @@ function keys(event: KeyboardEvent): void {
 async function start(): Promise<void> {
   window.addEventListener('keydown', keys)
   onDocsChanged(() => {
-    rows = new Map()
     void loadTree()
-    if (selected !== null) void loadDocument(selected)
+    if (selected?.kind === 'page') void loadPage(selected.id)
   })
-  onNotesFocus((entryId) => {
-    void focusOn(entryId)
+  onNotesFocus((pageId) => {
+    focusOnPage(pageId)
   })
 
   paint()
   await loadTree()
 
   const focus = await notesTakeFocus()
-  if (focus !== null) await focusOn(focus)
+  if (focus !== null) focusOnPage(focus)
 }
 
 void start()

@@ -42,7 +42,7 @@ pub struct Report {
     pub blocked: bool,
 }
 
-const MIN_CLI: &str = "0.3.0";
+const MIN_CLI: &str = "0.4.0";
 
 fn parts(version: &str) -> Vec<u32> {
     version

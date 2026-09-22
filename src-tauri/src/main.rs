@@ -56,6 +56,7 @@ fn main() {
             notes_cmd::notes_list,
             notes_cmd::notes_today,
             notes_cmd::notes_document,
+            notes_cmd::page_document,
             notes_cmd::notes_search,
             notes_cmd::open_document,
             notes_cmd::open_external,

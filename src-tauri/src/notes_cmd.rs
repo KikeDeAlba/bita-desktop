@@ -9,7 +9,7 @@ use crate::model::{Problem, ProblemKind};
 use crate::state::AppState;
 
 const OPEN: &str = "/usr/bin/open";
-const MIN_CLI: &str = "0.3.0";
+const MIN_CLI: &str = "0.4.0";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,7 +45,13 @@ fn stale_cli(problem: Problem) -> Problem {
 
 #[tauri::command]
 pub async fn notes_tree(app: AppHandle) -> Result<CliPayload, Problem> {
-    payload(&app, &["docs", "tree", "--months"]).await
+    payload(&app, &["docs", "tree", "--pages", "--months"]).await
+}
+
+#[tauri::command]
+pub async fn page_document(app: AppHandle, page_id: i64) -> Result<CliPayload, Problem> {
+    let id = page_id.to_string();
+    payload(&app, &["docs", "page", "show", &id]).await
 }
 
 #[tauri::command]
