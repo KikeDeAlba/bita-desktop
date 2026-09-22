@@ -12,6 +12,7 @@ const NUMBERED = /^(\s*)\d+[.)]\s+(.*)$/
 const QUOTE = /^>\s?(.*)$/
 const RULE = /^(?:-{3,}|\*{3,}|_{3,})\s*$/
 const TABLE = /^\s*\|.*\|\s*$/
+const ALIGN = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/
 const CODE_SPAN = /`([^`]+)`/
 const LINK = /\[([^\]\n]*)\]\(([^)\s]+)\)/
 const BARE_URL = /https?:\/\/[^\s<>()]+[^\s<>().,;:!?]/
@@ -128,7 +129,14 @@ export function renderMarkdown(source: string, options: RenderOptions = {}): Doc
         body.push(lines[index] ?? '')
         index += 1
       }
-      const pre = element('pre', 'md-code md-table')
+
+      const table = buildTable(body, emitter, options)
+      if (table !== null) {
+        fragment.appendChild(table)
+        continue
+      }
+
+      const pre = element('pre', 'md-code md-table-raw')
       const code = element('code')
       emitter.plain(code, body.join('\n'))
       pre.appendChild(code)
@@ -228,6 +236,88 @@ function list(
   }
 
   return { node, index }
+}
+
+export function splitRow(line: string): string[] {
+  const trimmed = line.trim()
+  const inner = trimmed.replace(/^\|/, '').replace(/\|$/, '')
+  const cells: string[] = []
+  let cell = ''
+  let inCode = false
+
+  for (let at = 0; at < inner.length; at += 1) {
+    const char = inner[at] as string
+    if (char === '\\' && inner[at + 1] === '|') {
+      cell += '|'
+      at += 1
+      continue
+    }
+    if (char === '`') inCode = !inCode
+    if (char === '|' && !inCode) {
+      cells.push(cell.trim())
+      cell = ''
+      continue
+    }
+    cell += char
+  }
+  cells.push(cell.trim())
+  return cells
+}
+
+function alignmentsOf(line: string): (string | null)[] {
+  return splitRow(line).map((cell) => {
+    const left = cell.startsWith(':')
+    const right = cell.endsWith(':')
+    if (left && right) return 'center'
+    if (right) return 'right'
+    if (left) return 'left'
+    return null
+  })
+}
+
+function buildTable(rows: string[], emitter: Emitter, options: RenderOptions): HTMLElement | null {
+  const headRow = rows[0]
+  const alignRow = rows[1]
+  if (headRow === undefined || alignRow === undefined) return null
+  if (!ALIGN.test(alignRow)) return null
+
+  const headings = splitRow(headRow)
+  const aligns = alignmentsOf(alignRow)
+  if (headings.length === 0 || aligns.length !== headings.length) return null
+
+  const scroll = element('div', 'md-table-scroll')
+  const table = element('table', 'md-table')
+
+  const thead = element('thead')
+  const headTr = element('tr')
+  for (const [at, heading] of headings.entries()) {
+    const th = element('th')
+    th.setAttribute('scope', 'col')
+    const align = aligns[at]
+    if (align) th.style.textAlign = align
+    inline(th, heading, emitter, options)
+    headTr.appendChild(th)
+  }
+  thead.appendChild(headTr)
+  table.appendChild(thead)
+
+  const tbody = element('tbody')
+  for (const raw of rows.slice(2)) {
+    const cells = splitRow(raw)
+    const tr = element('tr')
+    for (let at = 0; at < headings.length; at += 1) {
+      const td = element('td')
+      const align = aligns[at]
+      if (align) td.style.textAlign = align
+      inline(td, cells[at] ?? '', emitter, options)
+      tr.appendChild(td)
+    }
+    tbody.appendChild(tr)
+  }
+  table.appendChild(tbody)
+
+  scroll.appendChild(table)
+  return scroll
 }
 
 function inline(parent: Node, text: string, emitter: Emitter, options: RenderOptions): void {

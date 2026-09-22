@@ -38,6 +38,32 @@ const ICONS: Record<string, IconShape> = {
     stroke: true,
     path: '<path d="M9.4 2.6h4v4M13.4 2.6 7.6 8.4M11.4 9.6v3.2a.8.8 0 0 1-.8.8H3.4a.8.8 0 0 1-.8-.8V5.6a.8.8 0 0 1 .8-.8h3.2"/>',
   },
+  panelLeft: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="2.2" y="3" width="11.6" height="10" rx="2.2"/><path d="M6.4 3v10"/>',
+  },
+  panelRight: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="2.2" y="3" width="11.6" height="10" rx="2.2"/><path d="M9.6 3v10"/>',
+  },
+  task: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="2.4" y="2.4" width="11.2" height="11.2" rx="2.6"/><path d="M5.4 8.2 7.4 10.2l3.4-3.8"/>',
+  },
+  clock: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<circle cx="8" cy="8" r="5.6"/><path d="M8 4.6V8l2.4 1.5"/>',
+  },
+  list: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M3 4.4h10M3 8h7M3 11.6h8.6"/>',
+  },
+  plus: { view: '0 0 16 16', stroke: true, path: '<path d="M8 3.2v9.6M3.2 8h9.6"/>' },
 }
 
 export function icon(name: keyof typeof ICONS, size = 12): SVGSVGElement {

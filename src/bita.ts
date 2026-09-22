@@ -288,8 +288,104 @@ export interface Coverage {
 export interface TreeMeta {
   root: string
   timezone: string
-  sections: string[]
+  sections?: string[]
+  layout?: 'legacy' | 'hierarchical'
+  jira?: { siteUrl: string | null }
   totals: Coverage
+}
+
+export interface DocHeading {
+  heading: string
+  level: 2 | 3
+  anchor: string
+  order: number
+  empty: boolean
+}
+
+export interface PageIssue {
+  issueKey: string
+  role: 'epic' | 'story' | 'task' | 'subtask'
+  summary: string
+  status: string
+  statusCategory: '' | 'new' | 'indeterminate' | 'done'
+  url: string | null
+  refreshedAt: string | null
+}
+
+export interface PageNode {
+  pageId: number
+  parentId: number | null
+  projectId: number | null
+  projectName: string | null
+  projectSlug: string
+  slug: string
+  title: string
+  relPath: string
+  depth: number
+  position: number
+  status: string
+  entryCount: number
+  durationSeconds: number
+  durationHuman: string
+  issues: PageIssue[]
+  sectionCount: number
+  headingCount: number
+  byteSize: number
+  recordedAt: string
+  childCount: number
+  children?: PageNode[]
+}
+
+export interface Space {
+  projectId: number | null
+  projectName: string | null
+  projectSlug: string
+  active: boolean
+  entryCount: number
+  pageCount: number
+  pages: PageNode[]
+}
+
+export interface PageEntryRow {
+  entryId: number
+  title: string
+  summary: string
+  localDay: string
+  startLocal: string
+  durationSeconds: number
+  durationHuman: string
+  running: boolean
+  registered: boolean
+  issueKey: string | null
+}
+
+export interface PageDoc {
+  path: string
+  relPath: string
+  markdown: string | null
+  frontMatter: Record<string, string>
+  frontMatterValid: boolean
+  preamble: string
+  outline: DocHeading[]
+  file: DocFile
+}
+
+export interface PageCrumb {
+  pageId: number
+  title: string
+  slug: string
+}
+
+export interface PageChild extends PageCrumb {
+  relPath: string
+}
+
+export interface PageDocument extends Omit<PageNode, 'children'> {
+  ancestors: PageCrumb[]
+  children: PageChild[]
+  doc: PageDoc
+  entries: PageEntryRow[]
+  worklogIssues: string[]
 }
 
 export interface SearchMatch {
@@ -343,7 +439,7 @@ export interface CliPayload<D, M> {
   meta: M
 }
 
-export function notesTree(): Promise<CliPayload<{ projects: TreeProject[] }, TreeMeta>> {
+export function notesTree(): Promise<CliPayload<{ projects: TreeProject[]; spaces?: Space[] }, TreeMeta>> {
   return invoke('notes_tree')
 }
 
@@ -357,6 +453,10 @@ export function notesList(
 
 export function notesToday(): Promise<CliPayload<NoteRow[], ListMeta>> {
   return invoke('notes_today')
+}
+
+export function pageDocument(pageId: number): Promise<CliPayload<PageDocument, TreeMeta>> {
+  return invoke('page_document', { pageId })
 }
 
 export function notesDocument(entryId: number): Promise<CliPayload<NoteDocument, TreeMeta>> {
