@@ -121,7 +121,7 @@ Los documentos van aparte porque la ventana de notas también lee de ahí.
 | `BITA_CLI` | Forzar un CLI concreto en vez de buscarlo |
 | `BITA_DOCS_DIR` | Usar otro directorio de documentos; se le pasa al CLI como `--docs-dir` |
 | `BITA_KEEP_PANEL` | Abre el panel al arrancar y evita que se esconda al perder el foco, para poder usar las devtools |
-| `BITA_OPEN_NOTES` | Abre la ventana de notas al arrancar, para no depender del tray |
+| `BITA_NO_OPEN_NOTES` | No abre la ventana de documentación al arrancar; deja solo el icono del tray |
 | `BITA_KEEP_ACCESSORY` | No cambia la activation policy al abrir las notas: sin icono en el Dock ni barra de menús |
 | `BITA_EDITOR` | Qué binario abre un `.md` en vez de dejárselo a `open` |
 
@@ -183,10 +183,11 @@ El panel mide 380×520 y no es redimensionable, así que un documento de siete
 secciones no cabe. Las notas viven en una ventana propia de 960×640, de solo
 lectura: escribir sigue siendo del CLI, que es quien tiene el lock cooperativo.
 
-Se construye desde Rust bajo demanda en vez de declararla en `tauri.conf.json`.
-Una ventana declarada se crea al arrancar aunque esté oculta, y eso es un segundo
-webview residente para una vista que se abre de vez en cuando. Al cerrarla se
-esconde en lugar de destruirse, así que la segunda apertura es inmediata.
+Se abre junto con la app, y `BITA_NO_OPEN_NOTES` lo suprime. Aun así se construye
+desde Rust en vez de declararla en `tauri.conf.json`: una ventana declarada se
+crea siempre, con lo que esa variable no podría evitarla, y el panel del tray
+seguiría arrastrando un segundo webview en los arranques en los que no se quiere.
+Al cerrarla se esconde en lugar de destruirse, así que reabrirla es inmediato.
 
 Lleva su propio HTML (`notas.html`) y no una rama dentro de `index.html`, porque
 `scripts/measure-panel.swift` carga `index.html` en un WKWebView pelado, sin IPC

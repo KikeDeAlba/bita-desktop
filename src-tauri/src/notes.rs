@@ -10,7 +10,7 @@ pub const FOCUS_EVENT: &str = "bita://notes-focus";
 pub const STALE_EVENT: &str = "bita://docs-changed";
 
 const KEEP_ACCESSORY_ENV: &str = "BITA_KEEP_ACCESSORY";
-const OPEN_ON_START_ENV: &str = "BITA_OPEN_NOTES";
+const SKIP_ON_START_ENV: &str = "BITA_NO_OPEN_NOTES";
 const WIDTH: f64 = 960.0;
 const HEIGHT: f64 = 640.0;
 const MIN_WIDTH: f64 = 720.0;
@@ -105,7 +105,7 @@ fn wire(app: &AppHandle, window: &WebviewWindow) {
 }
 
 pub fn opens_on_start() -> bool {
-    env::var_os(OPEN_ON_START_ENV).is_some()
+    env::var_os(SKIP_ON_START_ENV).is_none()
 }
 
 pub fn mark_stale(app: &AppHandle) {
