@@ -20,11 +20,13 @@ export function closeDiagram(): void {
 export function openDiagram(source: SVGElement, caption: string): void {
   closeDiagram()
 
+  const natural = naturalSize(source)
+
   const svg = source.cloneNode(true) as SVGElement
   svg.removeAttribute('width')
   svg.removeAttribute('height')
-  svg.style.width = 'auto'
-  svg.style.height = 'auto'
+  svg.style.width = `${natural.width}px`
+  svg.style.height = `${natural.height}px`
   svg.style.maxWidth = 'none'
   svg.style.maxHeight = 'none'
   svg.style.display = 'block'
@@ -65,15 +67,12 @@ export function openDiagram(source: SVGElement, caption: string): void {
   const clamp = (value: number): number => Math.min(SCALE_MAX, Math.max(SCALE_MIN, value))
 
   const fit = (): void => {
-    const box = svg.getBoundingClientRect()
     const area = surface.getBoundingClientRect()
-    if (box.width === 0 || box.height === 0) return
+    if (area.width === 0 || area.height === 0) return
 
-    const natural = view.scale === 0 ? 1 : view.scale
-    const width = box.width / natural
-    const height = box.height / natural
-
-    fitted = clamp(Math.min((area.width - 64) / width, (area.height - 64) / height, 1))
+    fitted = clamp(
+      Math.min((area.width - 64) / natural.width, (area.height - 64) / natural.height, 1),
+    )
     view.scale = fitted
     view.x = 0
     view.y = 0
@@ -186,6 +185,21 @@ export function openDiagram(source: SVGElement, caption: string): void {
 
   paint()
   requestAnimationFrame(fit)
+}
+
+function naturalSize(svg: SVGElement): { width: number; height: number } {
+  const viewBox = svg.getAttribute('viewBox')
+  if (viewBox !== null) {
+    const parts = viewBox.split(/[\s,]+/).map(Number)
+    const width = parts[2]
+    const height = parts[3]
+    if (Number.isFinite(width) && Number.isFinite(height) && (width ?? 0) > 0 && (height ?? 0) > 0) {
+      return { width: width as number, height: height as number }
+    }
+  }
+
+  const box = svg.getBoundingClientRect()
+  return { width: box.width || 800, height: box.height || 600 }
 }
 
 function action(name: 'up' | 'down' | 'close', label: string): HTMLButtonElement {
