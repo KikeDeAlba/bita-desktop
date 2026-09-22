@@ -5,6 +5,7 @@ body:has(#notas) {
 #notas {
   --rail-w: 248px;
   --aside-w: 232px;
+  --doc-scale: 1;
   height: 100%;
   display: grid;
   grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--aside-w);
@@ -390,7 +391,7 @@ body:has(#notas) {
 
 #notas .doc-title {
   margin: 0 0 9px;
-  font-size: 21px;
+  font-size: calc(21px * var(--doc-scale));
   font-weight: 600;
   letter-spacing: -0.3px;
   line-height: 1.2;
@@ -437,6 +438,7 @@ body:has(#notas) {
   min-width: 0;
   user-select: text;
   cursor: auto;
+  font-size: calc(13px * var(--doc-scale));
 }
 
 #notas .doc-section {
@@ -446,7 +448,7 @@ body:has(#notas) {
 
 #notas .doc-section-title {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 1em;
   font-weight: 600;
   letter-spacing: -0.1px;
   color: var(--fg-bright);
@@ -463,14 +465,14 @@ body:has(#notas) {
 
 #notas .md-paragraph {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: 1em;
   line-height: 1.62;
   color: var(--fg);
 }
 
 #notas .md-heading {
   margin: 14px 0 7px;
-  font-size: 10.5px;
+  font-size: 0.81em;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.4px;
@@ -480,7 +482,7 @@ body:has(#notas) {
 #notas .md-list {
   margin: 0 0 12px;
   padding-left: 18px;
-  font-size: 13px;
+  font-size: 1em;
   line-height: 1.6;
   color: var(--fg);
 }
@@ -496,7 +498,7 @@ body:has(#notas) {
   border-radius: var(--radius-control);
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 0.88em;
   line-height: 1.5;
   color: var(--fg-dim);
   white-space: pre-wrap;
@@ -505,7 +507,7 @@ body:has(#notas) {
 
 #notas .md-inline-code {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 0.88em;
   color: var(--fg-dim);
 }
 
@@ -513,7 +515,7 @@ body:has(#notas) {
   margin: 0 0 12px;
   padding: 2px 0 2px 12px;
   border-left: 2px solid var(--elev);
-  font-size: 12.5px;
+  font-size: 0.96em;
   line-height: 1.6;
   color: var(--fg-dim);
 }
@@ -1054,7 +1056,7 @@ body:has(#notas) {
 #notas .md-table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 12.5px;
+  font-size: 0.96em;
 }
 
 #notas .md-table th {
