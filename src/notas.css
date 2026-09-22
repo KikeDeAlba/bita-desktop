@@ -1087,3 +1087,63 @@ body:has(#notas) {
     --aside-w: 40px;
   }
 }
+
+#notas .md-mermaid {
+  margin: 16px 0;
+  padding: 10px 12px 12px;
+  background: var(--inset);
+  border-radius: var(--radius-card);
+}
+
+#notas .md-mermaid-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#notas .md-mermaid-kind {
+  flex-grow: 1;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.3px;
+  color: var(--fg-mute);
+}
+
+#notas .md-mermaid-toggle {
+  padding: 2px 8px;
+  border: 1px solid var(--elev);
+  border-radius: 999px;
+  font-size: 10px;
+  color: var(--fg-dim);
+}
+
+#notas .md-mermaid-toggle:hover:not(:disabled) {
+  border-color: var(--elev-strong);
+  color: var(--fg-bright);
+}
+
+#notas .md-mermaid-toggle:disabled {
+  opacity: 0.4;
+}
+
+#notas .md-mermaid-stage {
+  display: block;
+  overflow-x: auto;
+}
+
+#notas .md-mermaid-note {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--fg-mute);
+}
+
+#notas .md-mermaid-source {
+  margin: 0;
+}
+
+#notas .md-mermaid-broken {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--estimate);
+}

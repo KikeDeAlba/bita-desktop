@@ -204,7 +204,33 @@ nodos con `element()`. No es por el peso: `marked` y `markdown-it` devuelven un
 string de HTML, lo que obliga a `innerHTML` sobre contenido leído de ficheros, y
 sanearlo bien exige una segunda dependencia. Construyendo nodos no hay nada que
 escapar, porque el escapado es estructural. Lo que la gramática no reconoce se
-emite como párrafo literal: nunca se pierde contenido.
+emite como párrafo literal: nunca se pierde contenido. Las tablas GFM salen como
+`<table>` de verdad por la misma vía, y cada celda pasa por el mismo paso en
+línea, así que los enlaces y el resaltado de la búsqueda funcionan dentro.
+
+## Los diagramas
+
+Un cercado ` ```mermaid ` se dibuja con mermaid, que es **la única dependencia
+que acaba dentro del bundle** además de `@tauri-apps/api`. Se carga con un
+`import()` dinámico sólo cuando la página tiene uno, así que vive en un chunk
+aparte y el arranque no lo paga: el bundle de la ventana pasa de 24 a 30 kB, y
+el megabyte largo de mermaid sólo se descarga si hace falta.
+
+`mermaid.render()` devuelve una **cadena** de SVG. No se inyecta con
+`innerHTML`: se parsea con `DOMParser` en modo `image/svg+xml`, que es inerte, se
+le quitan `script`, `foreignObject`, los atributos `on*` y cualquier `href` que
+no sea interno, y se adopta el nodo. La regla de no usar `innerHTML` sigue en
+pie.
+
+Va dentro de un `shadow root` porque los selectores de mermaid (`.node rect`,
+`.edgePath path`) se filtrarían al CSS del lector. La CSP **no se toca**:
+`style-src 'unsafe-inline'` ya estaba concedido, que es lo único que mermaid
+necesita. `securityLevel: 'strict'` y `htmlLabels: false` cierran el resto, y
+`theme: 'base'` es obligatorio y no preferencia, porque el tema por defecto ha
+emitido `@import` de Google Fonts y aquí `font-src 'self'` lo bloquearía.
+
+Un diagrama que no compila no puede tumbar el lector: cae al bloque de código
+con el motivo. Hay tope de 20 KB de fuente y 20 diagramas por página.
 
 ## Dónde se coloca el panel
 

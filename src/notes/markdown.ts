@@ -1,11 +1,13 @@
 import { element } from '../dom.ts'
+import { mermaidFigure } from './mermaid.ts'
 
 export interface RenderOptions {
   highlight?: string
   onLink?: (url: string) => void
+  onCopy?: (text: string) => void
 }
 
-const FENCE = /^(?:```|~~~)/
+const FENCE = /^(?:```|~~~)\s*([A-Za-z0-9_-]*)/
 const HEADING = /^(#{1,6})\s+(.*\S)\s*$/
 const BULLET = /^(\s*)[-*]\s+(.*)$/
 const NUMBERED = /^(\s*)\d+[.)]\s+(.*)$/
@@ -91,7 +93,9 @@ export function renderMarkdown(source: string, options: RenderOptions = {}): Doc
       continue
     }
 
-    if (FENCE.test(line)) {
+    const fence = FENCE.exec(line)
+    if (fence !== null) {
+      const language = (fence[1] ?? '').toLowerCase()
       const body: string[] = []
       index += 1
       while (index < lines.length && !FENCE.test(lines[index] ?? '')) {
@@ -99,6 +103,12 @@ export function renderMarkdown(source: string, options: RenderOptions = {}): Doc
         index += 1
       }
       index += 1
+
+      if (language === 'mermaid' && options.onCopy) {
+        fragment.appendChild(mermaidFigure(body.join('\n'), options.onCopy))
+        continue
+      }
+
       const pre = element('pre', 'md-code')
       const code = element('code')
       emitter.plain(code, body.join('\n'))

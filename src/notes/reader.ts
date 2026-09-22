@@ -1,6 +1,7 @@
 import type { PageDocument, PageIssue, Problem } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import { renderMarkdown } from './markdown.ts'
+import { resetPage } from './mermaid.ts'
 import { anchorOf } from './sections.ts'
 
 export interface ReaderHandlers {
@@ -161,6 +162,7 @@ function tasks(issues: PageIssue[], handlers: ReaderHandlers): HTMLElement {
 }
 
 function body(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
+  resetPage()
   const wrap = element('div', 'doc-body')
   const article = element('article', 'article')
   const page = state.page as PageDocument
@@ -199,6 +201,7 @@ function render(markdown: string, state: ReaderState, handlers: ReaderHandlers, 
   const rendered = renderMarkdown(markdown, {
     ...(state.query.trim().length > 0 ? { highlight: state.query.trim() } : {}),
     onLink: handlers.onOpenExternal,
+    onCopy: handlers.onCopy,
   })
   if (className === undefined) return rendered
   const wrap = element('div', className)
