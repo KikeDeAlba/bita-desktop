@@ -39,6 +39,14 @@ export function renderRail(host: HTMLElement, state: RailState, handlers: RailHa
     return
   }
 
+  const standing = host.querySelector<HTMLInputElement>('#rail-query')
+  const body = standing === null ? freshChrome(host, state, handlers) : keepChrome(host, standing, state)
+
+  if (state.query.trim().length > 0) renderResults(body, state, handlers)
+  else renderTree(body, state, handlers)
+}
+
+function freshChrome(host: HTMLElement, state: RailState, handlers: RailHandlers): HTMLElement {
   const head = element('div', 'rail-head')
   head.setAttribute('data-tauri-drag-region', '')
   const wordmark = element('span', 'rail-wordmark', 'documentación')
@@ -73,10 +81,24 @@ export function renderRail(host: HTMLElement, state: RailState, handlers: RailHa
   body.setAttribute('role', 'tree')
   body.setAttribute('aria-label', 'Espacios y páginas')
 
-  if (state.query.trim().length > 0) renderResults(body, state, handlers)
-  else renderTree(body, state, handlers)
-
   host.replaceChildren(head, search, body)
+  return body
+}
+
+function keepChrome(host: HTMLElement, input: HTMLInputElement, state: RailState): HTMLElement {
+  if (input.value !== state.query) input.value = state.query
+
+  const standing = host.querySelector<HTMLElement>('.rail-body')
+  if (standing !== null) {
+    standing.replaceChildren()
+    return standing
+  }
+
+  const body = element('div', 'rail-body')
+  body.setAttribute('role', 'tree')
+  body.setAttribute('aria-label', 'Espacios y páginas')
+  host.append(body)
+  return body
 }
 
 function collapsedStrip(state: RailState, handlers: RailHandlers): HTMLElement {
