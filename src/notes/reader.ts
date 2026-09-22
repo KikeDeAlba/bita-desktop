@@ -270,13 +270,22 @@ export interface SplitDocument {
 
 const CODE_FENCE = /^ {0,3}(`{3,}|~{3,})/
 
+export function withoutFrontMatter(markdown: string): string {
+  const text = markdown.startsWith('\ufeff') ? markdown.slice(1) : markdown
+  if (!text.startsWith('---\n')) return text
+
+  const closing = text.indexOf('\n---\n', 3)
+  if (closing === -1) return text
+  return text.slice(closing + 5)
+}
+
 export function splitSections(markdown: string): SplitDocument {
   const sections: { heading: string; body: string }[] = []
   const lede: string[] = []
   let current: { heading: string; body: string[] } | null = null
   let fence: { char: string; length: number } | null = null
 
-  for (const line of markdown.split('\n')) {
+  for (const line of withoutFrontMatter(markdown).split('\n')) {
     const marker = CODE_FENCE.exec(line)?.[1]
     if (fence !== null) {
       if (marker !== undefined && marker.slice(0, 1) === fence.char && marker.length >= fence.length) fence = null
