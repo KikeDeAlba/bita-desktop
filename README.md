@@ -240,6 +240,12 @@ necesita. `securityLevel: 'strict'` y `htmlLabels: false` cierran el resto, y
 `theme: 'base'` es obligatorio y no preferencia, porque el tema por defecto ha
 emitido `@import` de Google Fonts y aquí `font-src 'self'` lo bloquearía.
 
+Al hacer clic sobre un diagrama se abre a pantalla completa: la rueda acerca y
+aleja sobre el puntero, se arrastra para moverse, doble clic o `0` vuelve a
+encajarlo, y `Esc` cierra. La copia que se muestra va en su propio shadow root,
+igual que la incrustada, para que el `<style>` de Mermaid no se escape al
+documento.
+
 Un diagrama que no compila no puede tumbar el lector: cae al bloque de código
 con el motivo. Hay tope de 20 KB de fuente y 20 diagramas por página.
 

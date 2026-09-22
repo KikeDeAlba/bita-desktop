@@ -1,5 +1,6 @@
 import { element } from '../dom.ts'
 import { adoptSvg } from './svg.ts'
+import { openDiagram } from './lightbox.ts'
 
 const SOURCE_MAX = 20_000
 const PER_PAGE_MAX = 20
@@ -116,6 +117,23 @@ async function draw(
     const shadow = stage.shadowRoot ?? stage.attachShadow({ mode: 'open' })
     shadow.replaceChildren(adopted)
     stage.replaceChildren()
+
+    const label = kindOf(source)
+    stage.classList.add('md-mermaid-stage--ready')
+    stage.setAttribute('role', 'button')
+    stage.setAttribute('tabindex', '0')
+    stage.setAttribute('aria-label', `${label}: abrir a pantalla completa`)
+    stage.title = 'Abrir a pantalla completa'
+
+    const show = (): void => {
+      openDiagram(adopted, label)
+    }
+    stage.addEventListener('click', show)
+    stage.addEventListener('keydown', (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return
+      event.preventDefault()
+      show()
+    })
   } catch (error) {
     const reason = error instanceof Error ? error.message.split('\n')[0] : 'no compila'
     degrade(figure, stage, code, toggle, `El diagrama no compila: ${reason ?? 'no compila'}`)
@@ -123,6 +141,16 @@ async function draw(
     document.getElementById(id)?.remove()
     document.querySelector(`#d${id}`)?.remove()
   }
+}
+
+function kindOf(source: string): string {
+  const first = source.trim().split(/\s|\n/)[0]?.toLowerCase() ?? ''
+  if (first.startsWith('sequence')) return 'Diagrama de secuencia'
+  if (first.startsWith('flowchart') || first.startsWith('graph')) return 'Diagrama de flujo'
+  if (first.startsWith('erdiagram')) return 'Diagrama entidad relación'
+  if (first.startsWith('statediagram')) return 'Diagrama de estados'
+  if (first.startsWith('gantt')) return 'Diagrama de Gantt'
+  return 'Diagrama'
 }
 
 function degrade(

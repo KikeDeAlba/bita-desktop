@@ -1149,3 +1149,103 @@ body:has(#notas) {
   font-size: 11px;
   color: var(--estimate);
 }
+
+#notas .md-mermaid-stage--ready {
+  cursor: zoom-in;
+  border-radius: var(--radius-control);
+}
+
+#notas .md-mermaid-stage--ready:hover {
+  outline: 1px solid var(--elev-strong);
+  outline-offset: 4px;
+}
+
+#notas .md-mermaid-stage--ready:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 4px;
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: rgba(24, 22, 21, 0.94);
+  user-select: none;
+}
+
+.lightbox-bar {
+  height: 44px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  padding: 0 12px 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.lightbox-caption {
+  flex-grow: 1;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--fg-mute);
+}
+
+.lightbox-action {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--elev);
+  border-radius: var(--radius-control);
+  color: var(--fg-dim);
+  background: none;
+  cursor: default;
+}
+
+.lightbox-action:hover {
+  border-color: var(--elev-strong);
+  color: var(--fg-bright);
+}
+
+.lightbox-reset {
+  min-width: 52px;
+  padding: 4px 8px;
+  border: 1px solid var(--elev);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-dim);
+  background: none;
+  cursor: default;
+}
+
+.lightbox-reset:hover {
+  border-color: var(--elev-strong);
+  color: var(--fg-bright);
+}
+
+.lightbox-surface {
+  flex-grow: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+
+.lightbox-surface--holding {
+  cursor: grabbing;
+}
+
+.lightbox-stage {
+  transform-origin: center center;
+  will-change: transform;
+}
