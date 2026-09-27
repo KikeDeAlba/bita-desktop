@@ -229,16 +229,26 @@ el megabyte largo de mermaid sólo se descarga si hace falta.
 
 `mermaid.render()` devuelve una **cadena** de SVG. No se inyecta con
 `innerHTML`: se parsea con `DOMParser` en modo `image/svg+xml`, que es inerte, se
-le quitan `script`, `foreignObject`, los atributos `on*` y cualquier `href` que
-no sea interno, y se adopta el nodo. La regla de no usar `innerHTML` sigue en
-pie.
+le quitan `script`, los atributos `on*` y cualquier `href` que no sea interno, y
+se adopta el nodo. La regla de no usar `innerHTML` sigue en pie.
+
+Mermaid 12 sigue escribiendo etiquetas HTML dentro de `foreignObject` en los
+títulos de los subgrafos, y serializa sus saltos de línea como `<br>` sin
+cerrar. Eso no es XML, y el parser lo rechaza aunque el diagrama compile. Cuando
+pasa, el SVG se lee con el parser HTML, que lo deja en el namespace de SVG, y
+pasa por el mismo saneado.
+
+Los diagramas se dibujan **siempre en claro**, sobre una tarjeta blanca, aunque
+la ventana sea oscura: los diagramas densos se leen mejor así, y es como los
+enseña Confluence.
 
 Va dentro de un `shadow root` porque los selectores de mermaid (`.node rect`,
 `.edgePath path`) se filtrarían al CSS del lector. La CSP **no se toca**:
 `style-src 'unsafe-inline'` ya estaba concedido, que es lo único que mermaid
 necesita. `securityLevel: 'strict'` y `htmlLabels: false` cierran el resto, y
 `theme: 'base'` es obligatorio y no preferencia, porque el tema por defecto ha
-emitido `@import` de Google Fonts y aquí `font-src 'self'` lo bloquearía.
+emitido `@import` de Google Fonts y aquí `font-src 'self'` lo bloquearía. La
+paleta clara va entera en `themeVariables`, copiada de la del tema por defecto.
 
 Al hacer clic sobre un diagrama se abre a pantalla completa: la rueda acerca y
 aleja sobre el puntero, se arrastra para moverse, doble clic o `0` vuelve a
