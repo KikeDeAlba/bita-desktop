@@ -58,6 +58,8 @@ fn main() {
             notes_cmd::notes_document,
             notes_cmd::page_document,
             notes_cmd::notes_search,
+            notes_cmd::backlog_list,
+            notes_cmd::backlog_set_status,
             notes_cmd::open_document,
             notes_cmd::open_external,
             notes_cmd::copy_text,

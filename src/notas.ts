@@ -1,4 +1,8 @@
 import {
+  backlogList,
+  backlogSetStatus,
+  type BacklogItem,
+  type BacklogStatus,
   copyText,
   describeProblem,
   notesDocument,
@@ -20,6 +24,7 @@ import { must } from './dom.ts'
 import { renderAside, type AsideState } from './notes/aside.ts'
 import { renderRail, pageKey, spaceKey, type RailState, type Selection } from './notes/rail.ts'
 import { renderReader, type ReaderState } from './notes/reader.ts'
+import { openCount, renderBacklog, type BacklogFilter, type BacklogState } from './notes/backlog.ts'
 
 const railHost = must<HTMLElement>('#rail')
 const readerHost = must<HTMLElement>('#reader')
@@ -49,6 +54,11 @@ let railOpen = remembered(RAIL_KEY)
 let asideOpen = remembered(ASIDE_KEY)
 let logOpen = true
 let scale = rememberedScale()
+let backlog: BacklogItem[] | null = null
+let backlogFilter: BacklogFilter = 'pending'
+let backlogFailure: Problem | null = null
+const backlogBusy = new Set<number>()
+const backlogExpanded = new Set<number>()
 
 let railPainted = ''
 let readerPainted = ''
@@ -102,7 +112,31 @@ function railState(): RailState {
     pageCount,
     loading: loadingTree,
     open: railOpen,
+    backlogOpen: backlog === null ? null : openCount(backlog),
   }
+}
+
+function backlogState(): BacklogState {
+  return {
+    items: backlog,
+    filter: backlogFilter,
+    failure: backlogFailure,
+    busy: backlogBusy,
+    expanded: backlogExpanded,
+    railOpen,
+  }
+}
+
+function backlogSignature(): string {
+  return [
+    'backlog',
+    backlogFilter,
+    backlog === null ? 'pending' : backlog.map((item) => `${item.id}:${item.status}:${item.updatedAt}`).join(','),
+    backlogFailure?.message ?? '',
+    [...backlogBusy].join('.'),
+    [...backlogExpanded].join('.'),
+    railOpen,
+  ].join('~')
 }
 
 function readerState(): ReaderState {
@@ -136,6 +170,7 @@ function railSignature(): string {
     results === null ? 'pending' : results.map((entry) => entry.entryId).join('.'),
     loadingTree,
     railOpen,
+    backlog === null ? 'pending' : openCount(backlog),
   ].join('~')
 }
 
@@ -161,6 +196,8 @@ function asideSignature(): string {
     opened?.recordedAt ?? '',
     opened?.entries.length ?? 0,
     opened?.issues.map((issue) => `${issue.issueKey}:${issue.statusCategory}`).join(',') ?? '',
+    opened?.refs?.map((ref) => ref.url).join(',') ?? '',
+    opened?.backlog?.map((item) => `${item.id}:${item.status}`).join(',') ?? '',
     active ?? '',
     asideOpen,
     logOpen,
@@ -176,12 +213,34 @@ function paint(): void {
       onToggle: toggleNode,
       onSelectPage: selectPage,
       onSelectEntry: openEntryDocument,
+      onSelectBacklog: selectBacklog,
       onCollapse: () => setRail(false),
     })
   }
 
+  if (selected?.kind === 'backlog') {
+    const view = backlogSignature()
+    if (view !== readerPainted) {
+      readerPainted = view
+      renderBacklog(readerHost, backlogState(), {
+        onFilter: (filter) => {
+          backlogFilter = filter
+          paint()
+        },
+        onStatus: setBacklogStatus,
+        onToggleItem: (id) => {
+          if (backlogExpanded.has(id)) backlogExpanded.delete(id)
+          else backlogExpanded.add(id)
+          paint()
+        },
+        onOpenPage: selectPage,
+        onExpandRail: () => setRail(true),
+      })
+    }
+  }
+
   const reader = readerSignature()
-  if (reader !== readerPainted) {
+  if (selected?.kind !== 'backlog' && reader !== readerPainted) {
     readerPainted = reader
     renderReader(readerHost, readerState(), {
       onPrev: () => step(-1),
@@ -211,6 +270,7 @@ function paint(): void {
       },
       onChild: selectPage,
       onEntry: openEntryDocument,
+      onBacklog: selectBacklog,
       onCollapse: () => setAside(false),
       onExpand: () => setAside(true),
     })
@@ -323,6 +383,41 @@ function step(delta: number): void {
   const at = selected?.kind === 'page' ? order.indexOf(selected.id) : -1
   const next = order[at === -1 ? 0 : Math.min(order.length - 1, Math.max(0, at + delta))]
   if (next !== undefined && next !== selected?.id) selectPage(next)
+}
+
+function selectBacklog(): void {
+  selected = { kind: 'backlog', id: 0 }
+  opened = null
+  active = null
+  paint()
+  void loadBacklog()
+}
+
+async function loadBacklog(): Promise<void> {
+  try {
+    const payload = await backlogList()
+    backlog = payload.data
+    backlogFailure = null
+  } catch (error) {
+    backlogFailure = describeProblem(error)
+  }
+  paint()
+}
+
+function setBacklogStatus(id: number, status: BacklogStatus): void {
+  backlogBusy.add(id)
+  paint()
+  void (async () => {
+    try {
+      const payload = await backlogSetStatus(id, status)
+      backlog = (backlog ?? []).map((item) => (item.id === id ? { ...item, ...payload.data } : item))
+      backlogFailure = null
+    } catch (error) {
+      backlogFailure = describeProblem(error)
+    }
+    backlogBusy.delete(id)
+    paint()
+  })()
 }
 
 function selectPage(pageId: number): void {
@@ -522,6 +617,7 @@ async function start(): Promise<void> {
   window.addEventListener('keydown', keys)
   onDocsChanged(() => {
     void loadTree()
+    void loadBacklog()
     if (selected?.kind === 'page') void loadPage(selected.id)
   })
   onNotesFocus((pageId) => {
@@ -530,6 +626,7 @@ async function start(): Promise<void> {
 
   paint()
   await loadTree()
+  void loadBacklog()
 
   const focus = await notesTakeFocus()
   if (focus !== null) focusOnPage(focus)

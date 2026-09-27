@@ -64,6 +64,12 @@ const ICONS: Record<string, IconShape> = {
     path: '<path d="M3 4.4h10M3 8h7M3 11.6h8.6"/>',
   },
   plus: { view: '0 0 16 16', stroke: true, path: '<path d="M8 3.2v9.6M3.2 8h9.6"/>' },
+  check: { view: '0 0 16 16', stroke: true, path: '<path d="M3.6 8.4 6.6 11.2 12.4 4.8"/>' },
+  inbox: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M2.6 9.2 4.4 3.6h7.2l1.8 5.6v3.2a.8.8 0 0 1-.8.8H3.4a.8.8 0 0 1-.8-.8Z"/><path d="M2.6 9.2h3.2l.8 1.6h2.8l.8-1.6h3.2"/>',
+  },
 }
 
 export function icon(name: keyof typeof ICONS, size = 12): SVGSVGElement {

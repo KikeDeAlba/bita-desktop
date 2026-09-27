@@ -10,6 +10,7 @@ use crate::state::AppState;
 
 const OPEN: &str = "/usr/bin/open";
 const MIN_CLI: &str = "0.4.0";
+const BACKLOG_CLI: &str = "0.7.0";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,6 +103,51 @@ pub async fn notes_search(
         args.push(project);
     }
     payload(&app, &args).await
+}
+
+#[tauri::command]
+pub async fn backlog_list(app: AppHandle) -> Result<CliPayload, Problem> {
+    payload(&app, &["backlog", "ls", "--status", "all"])
+        .await
+        .map_err(stale_backlog)
+}
+
+#[tauri::command]
+pub async fn backlog_set_status(
+    app: AppHandle,
+    id: i64,
+    status: String,
+) -> Result<CliPayload, Problem> {
+    let action = backlog_action(&status)?;
+    let id = id.to_string();
+    payload(&app, &["backlog", action, &id])
+        .await
+        .map_err(stale_backlog)
+}
+
+fn backlog_action(status: &str) -> Result<&'static str, Problem> {
+    match status {
+        "resolved" => Ok("resolve"),
+        "open" => Ok("reopen"),
+        other => Err(Problem::new(
+            ProblemKind::CliFailed,
+            format!("No conozco el estado «{other}»."),
+        )),
+    }
+}
+
+fn stale_backlog(problem: Problem) -> Problem {
+    if problem.kind != ProblemKind::CliTooOld && !problem.message.contains("Unknown command \"backlog\"")
+    {
+        return problem;
+    }
+    Problem::new(
+        ProblemKind::CliTooOld,
+        format!("El CLI de bita es anterior a la {BACKLOG_CLI} y no conoce el backlog."),
+    )
+    .with_hint(Some(
+        "Actualízalo desde Ajustes. Si lo tienes enlazado a un clon, actualiza ese clon.".into(),
+    ))
 }
 
 #[tauri::command]
@@ -255,6 +301,24 @@ mod tests {
 
         assert_eq!(mapped.kind, ProblemKind::CliFailed);
         assert_eq!(mapped.message, "No entry #999. (USAGE_ERROR)");
+    }
+
+    #[test]
+    fn a_cli_without_backlog_names_the_version_that_has_it() {
+        let raw = Problem::new(
+            ProblemKind::CliFailed,
+            "Unknown command \"docs\". Run \"bita --help\" for the list. (USAGE_ERROR)",
+        );
+        let mapped = super::stale_backlog(stale_cli(raw));
+        assert_eq!(mapped.kind, ProblemKind::CliTooOld);
+        assert!(mapped.message.contains(super::BACKLOG_CLI));
+    }
+
+    #[test]
+    fn only_open_and_resolved_reach_the_cli() {
+        assert_eq!(super::backlog_action("resolved").ok(), Some("resolve"));
+        assert_eq!(super::backlog_action("open").ok(), Some("reopen"));
+        assert!(super::backlog_action("rm").is_err());
     }
 
     #[test]
