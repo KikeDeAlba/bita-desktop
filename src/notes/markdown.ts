@@ -15,6 +15,7 @@ const QUOTE = /^>\s?(.*)$/
 const RULE = /^(?:-{3,}|\*{3,}|_{3,})\s*$/
 const TABLE = /^\s*\|.*\|\s*$/
 const ALIGN = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/
+const WIDE_TABLE_COLUMNS = 4
 const CODE_SPAN = /`([^`]+)`/
 const LINK = /\[([^\]\n]*)\]\(([^)\s]+)\)/
 const BARE_URL = /https?:\/\/[^\s<>()]+[^\s<>().,;:!?]/
@@ -296,7 +297,7 @@ function buildTable(rows: string[], emitter: Emitter, options: RenderOptions): H
   if (headings.length === 0 || aligns.length !== headings.length) return null
 
   const scroll = element('div', 'md-table-scroll')
-  const table = element('table', 'md-table')
+  const table = element('table', headings.length > WIDE_TABLE_COLUMNS ? 'md-table md-table--wide' : 'md-table')
 
   const thead = element('thead')
   const headTr = element('tr')

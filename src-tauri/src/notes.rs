@@ -11,10 +11,33 @@ pub const STALE_EVENT: &str = "bita://docs-changed";
 
 const KEEP_ACCESSORY_ENV: &str = "BITA_KEEP_ACCESSORY";
 const SKIP_ON_START_ENV: &str = "BITA_NO_OPEN_NOTES";
-const WIDTH: f64 = 960.0;
-const HEIGHT: f64 = 640.0;
+const WIDTH: f64 = 1280.0;
+const HEIGHT: f64 = 820.0;
 const MIN_WIDTH: f64 = 720.0;
 const MIN_HEIGHT: f64 = 420.0;
+const SCREEN_SHARE: f64 = 0.9;
+
+fn fit(wanted: f64, available: Option<f64>, minimum: f64) -> f64 {
+    match available {
+        Some(space) if space > 0.0 => wanted.min(space * SCREEN_SHARE).max(minimum),
+        _ => wanted,
+    }
+}
+
+fn initial_size(app: &AppHandle) -> (f64, f64) {
+    let screen = app.primary_monitor().ok().flatten().map(|monitor| {
+        let scale = monitor.scale_factor();
+        let area = monitor.work_area();
+        (
+            f64::from(area.size.width) / scale,
+            f64::from(area.size.height) / scale,
+        )
+    });
+    (
+        fit(WIDTH, screen.map(|(width, _)| width), MIN_WIDTH),
+        fit(HEIGHT, screen.map(|(_, height)| height), MIN_HEIGHT),
+    )
+}
 
 #[derive(Default)]
 pub struct NotesFocus {
@@ -69,9 +92,10 @@ pub fn open(app: &AppHandle, entry_id: Option<i64>) -> tauri::Result<()> {
 }
 
 fn build(app: &AppHandle) -> tauri::Result<WebviewWindow> {
+    let (width, height) = initial_size(app);
     let builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("notas.html".into()))
         .title("Notas de bita")
-        .inner_size(WIDTH, HEIGHT)
+        .inner_size(width, height)
         .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .resizable(true)
         .decorations(true)
@@ -143,3 +167,28 @@ fn regular_activation(_app: &AppHandle) {}
 
 #[cfg(not(target_os = "macos"))]
 fn accessory_activation(_app: &AppHandle) {}
+
+#[cfg(test)]
+mod tests {
+    use super::fit;
+
+    #[test]
+    fn a_large_screen_gets_the_full_size() {
+        assert_eq!(fit(1280.0, Some(1728.0), 720.0), 1280.0);
+    }
+
+    #[test]
+    fn a_small_screen_caps_the_window_at_most_of_it() {
+        assert_eq!(fit(1280.0, Some(1280.0), 720.0), 1152.0);
+    }
+
+    #[test]
+    fn the_minimum_still_holds_on_a_tiny_screen() {
+        assert_eq!(fit(1280.0, Some(600.0), 720.0), 720.0);
+    }
+
+    #[test]
+    fn without_a_monitor_the_wanted_size_stands() {
+        assert_eq!(fit(1280.0, None, 720.0), 1280.0);
+    }
+}
