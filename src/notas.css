@@ -440,8 +440,39 @@ body.resizing * {
 #notas .doc-header {
   flex-shrink: 0;
   box-sizing: border-box;
-  padding: 16px 28px 14px;
+  padding: 16px max(28px, calc((100% - var(--prose-w)) / 2)) 14px;
   border-bottom: 1px solid var(--line-soft);
+}
+
+#notas .prose-width {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: 4px;
+  color: var(--fg-mute);
+}
+
+#notas .prose-width-glyph {
+  display: inline-block;
+  height: 9px;
+  border-left: 1.5px solid currentColor;
+  border-right: 1.5px solid currentColor;
+}
+
+#notas .prose-width-glyph--narrow {
+  width: 5px;
+}
+
+#notas .prose-width-glyph--wide {
+  width: 11px;
+}
+
+#notas .prose-width-range {
+  width: 84px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--blue);
+  cursor: pointer;
 }
 
 #notas .doc-title {

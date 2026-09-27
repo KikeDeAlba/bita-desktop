@@ -25,6 +25,7 @@ import { renderAside, type AsideState } from './notes/aside.ts'
 import { renderRail, pageKey, spaceKey, type RailState, type Selection } from './notes/rail.ts'
 import { renderReader, type ReaderState } from './notes/reader.ts'
 import { attachSash } from './notes/sash.ts'
+import { initProse, stepProse } from './notes/prose.ts'
 import { openCount, renderBacklog, type BacklogFilter, type BacklogState } from './notes/backlog.ts'
 
 const railHost = must<HTMLElement>('#rail')
@@ -584,6 +585,12 @@ function keys(event: KeyboardEvent): void {
     return
   }
 
+  if ((event.metaKey || event.ctrlKey) && (event.key === ']' || event.key === '[')) {
+    event.preventDefault()
+    stepProse(event.key === ']' ? 1 : -1)
+    return
+  }
+
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g') {
     event.preventDefault()
     moveHit(event.shiftKey ? -1 : 1)
@@ -643,6 +650,7 @@ function attachSashes(): void {
 
 async function start(): Promise<void> {
   applyScale(scale)
+  initProse(must<HTMLElement>('#notas'))
   attachSashes()
   window.addEventListener('keydown', keys)
   onDocsChanged(() => {
