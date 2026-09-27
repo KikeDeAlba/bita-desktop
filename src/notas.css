@@ -3,8 +3,10 @@ body:has(#notas) {
 }
 
 #notas {
-  --rail-w: 248px;
-  --aside-w: 232px;
+  --rail-w: 220px;
+  --aside-w: 200px;
+  --prose-w: 720px;
+  --wide-w: 1180px;
   --doc-scale: 1;
   height: 100%;
   display: grid;
@@ -426,16 +428,15 @@ body:has(#notas) {
   flex-grow: 1;
   min-height: 0;
   overflow: hidden auto;
-  display: grid;
-  grid-template-columns: minmax(0, 486px) 136px;
-  gap: 26px;
-  justify-content: center;
-  align-items: start;
+  container-type: inline-size;
   padding: 22px 24px 28px;
 }
 
 #notas .article {
+  --wide: min(100cqi, var(--wide-w));
   min-width: 0;
+  max-width: var(--prose-w);
+  margin: 0 auto;
   user-select: text;
   cursor: auto;
   font-size: calc(13px * var(--doc-scale));
@@ -835,15 +836,6 @@ body:has(#notas) {
   margin-bottom: 18px;
 }
 
-#notas .doc-body {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-#notas .article {
-  max-width: 640px;
-  margin: 0 auto;
-}
-
 #notas .aside {
   display: flex;
   flex-direction: column;
@@ -1053,6 +1045,18 @@ body:has(#notas) {
   border-radius: var(--radius-card);
 }
 
+#notas .article .md-table-scroll,
+#notas .article .md-mermaid {
+  width: max(100%, var(--wide));
+  margin-inline: min(0px, calc((100% - var(--wide)) / 2));
+  box-sizing: border-box;
+}
+
+#notas .md-table--wide th {
+  white-space: normal;
+  min-width: 7ch;
+}
+
 #notas .md-table {
   border-collapse: collapse;
   width: 100%;
@@ -1084,7 +1088,7 @@ body:has(#notas) {
   background: var(--card-quiet);
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1100px) {
   #notas {
     --aside-w: 40px;
   }
