@@ -21,7 +21,11 @@ arranca con ella. Si lo tienes instalado, usa el tuyo.
 
 ## Instalación
 
-Por ahora se compila en local; no hay releases.
+Cada versión se publica en
+[GitHub Releases](https://github.com/KikeDeAlba/bita-desktop/releases) como un
+`.dmg` para Apple Silicon, firmado ad hoc y sin notarizar: la primera vez hay
+que abrirlo con clic derecho → Abrir. Para compilarlo tú mismo, sigue estos
+pasos.
 
 ### 1. Toolchain
 
@@ -180,8 +184,21 @@ un `.md`, solo los lee a través del subproceso del CLI, y leer no mueve el
 ## La ventana de notas
 
 El panel mide 380×520 y no es redimensionable, así que un documento de siete
-secciones no cabe. Las notas viven en una ventana propia de 960×640, de solo
-lectura: escribir sigue siendo del CLI, que es quien tiene el lock cooperativo.
+secciones no cabe. Las notas viven en una ventana propia de 1280×820 (o el 90 %
+de la pantalla, si es más chica), de solo lectura: escribir sigue siendo del
+CLI, que es quien tiene el lock cooperativo, salvo marcar un pendiente como
+resuelto.
+
+La prosa va en una columna de 720 px, y las tablas y los diagramas se abren a
+todo el ancho del lector. El árbol y el panel lateral se redimensionan
+arrastrando su borde; el ancho se recuerda y el doble clic lo devuelve al de
+fábrica.
+
+**Pendientes y hallazgos** es una vista propia, fija sobre el árbol: la lista
+del backlog de bita de todos los proyectos, agrupada por proyecto y página, con
+un clic para resolver o reabrir (`bita backlog resolve|reopen`). El panel
+lateral de cada página enseña los suyos abiertos y los enlaces que se
+registraron para ella. Necesita el CLI 0.7 o posterior.
 
 Se abre junto con la app, y `BITA_NO_OPEN_NOTES` lo suprime. Aun así se construye
 desde Rust en vez de declararla en `tauri.conf.json`: una ventana declarada se
