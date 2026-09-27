@@ -1,10 +1,12 @@
 import { element } from '../dom.ts'
 import { mermaidFigure } from './mermaid.ts'
+import { drawioFigure, type DrawioContext } from './drawio.ts'
 
 export interface RenderOptions {
   highlight?: string
   onLink?: (url: string) => void
   onCopy?: (text: string) => void
+  drawio?: DrawioContext
 }
 
 const FENCE = /^(?:```|~~~)\s*([A-Za-z0-9_-]*)/
@@ -107,6 +109,11 @@ export function renderMarkdown(source: string, options: RenderOptions = {}): Doc
 
       if (language === 'mermaid' && options.onCopy) {
         fragment.appendChild(mermaidFigure(body.join('\n'), options.onCopy))
+        continue
+      }
+
+      if (language === 'drawio' && options.drawio) {
+        fragment.appendChild(drawioFigure(body.join('\n'), options.drawio))
         continue
       }
 

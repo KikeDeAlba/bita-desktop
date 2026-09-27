@@ -1588,3 +1588,15 @@ body.resizing * {
 #notas .aside-backlog-text {
   min-width: 0;
 }
+
+#notas .md-drawio .md-mermaid-stage--ready {
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+
+#notas .md-drawio-image {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}

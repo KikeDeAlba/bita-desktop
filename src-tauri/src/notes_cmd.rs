@@ -175,6 +175,52 @@ pub async fn open_document(rel_path: String) -> Result<(), Problem> {
     ))
 }
 
+const ASSET_MAX_BYTES: u64 = 10 * 1024 * 1024;
+const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+fn base64(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let triple = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for (at, shift) in [18, 12, 6, 0].into_iter().enumerate() {
+            if at <= chunk.len() {
+                out.push(BASE64[((triple >> shift) & 0x3f) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+#[tauri::command]
+pub async fn page_asset(rel_path: String) -> Result<Option<String>, Problem> {
+    let candidate = image_shaped(&rel_path).map_err(|reason| {
+        Problem::new(
+            ProblemKind::CliFailed,
+            format!("\"{rel_path}\" no es un asset de bita: {reason}."),
+        )
+    })?;
+    let target = cli::docs_root().join(candidate);
+    if !target.exists() {
+        return Ok(None);
+    }
+    let absolute = resolve_inside(&rel_path, image_shaped)?;
+    let size = std::fs::metadata(&absolute).map(|meta| meta.len()).unwrap_or(0);
+    if size > ASSET_MAX_BYTES {
+        return Err(Problem::new(
+            ProblemKind::Unreadable,
+            format!("El render de {rel_path} pesa más de 10 MB."),
+        ));
+    }
+    let bytes = std::fs::read(&absolute).map_err(|error| {
+        Problem::new(ProblemKind::Unreadable, format!("No pude leer {rel_path}: {error}"))
+    })?;
+    Ok(Some(format!("data:image/png;base64,{}", base64(&bytes))))
+}
+
 #[tauri::command]
 pub async fn open_external(url: String) -> Result<(), Problem> {
     let parsed = url.trim();
@@ -210,7 +256,7 @@ pub fn copy_text(text: String) -> Result<(), Problem> {
     ))
 }
 
-fn doc_shaped(rel_path: &str) -> Result<&Path, &'static str> {
+fn relative_inside(rel_path: &str) -> Result<&Path, &'static str> {
     let candidate = Path::new(rel_path);
     if candidate.is_absolute() {
         return Err("la ruta es absoluta");
@@ -221,13 +267,43 @@ fn doc_shaped(rel_path: &str) -> Result<&Path, &'static str> {
     {
         return Err("la ruta sale del directorio");
     }
-    if candidate.extension().and_then(|value| value.to_str()) != Some("md") {
-        return Err("no es un .md");
+    Ok(candidate)
+}
+
+fn in_assets(candidate: &Path) -> bool {
+    candidate
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".assets"))
+}
+
+fn extension(candidate: &Path) -> Option<&str> {
+    candidate.extension().and_then(|value| value.to_str())
+}
+
+fn doc_shaped(rel_path: &str) -> Result<&Path, &'static str> {
+    let candidate = relative_inside(rel_path)?;
+    match extension(candidate) {
+        Some("md") => Ok(candidate),
+        Some("drawio") if in_assets(candidate) => Ok(candidate),
+        _ => Err("no es un .md ni un .drawio de una página"),
+    }
+}
+
+fn image_shaped(rel_path: &str) -> Result<&Path, &'static str> {
+    let candidate = relative_inside(rel_path)?;
+    if extension(candidate) != Some("png") || !in_assets(candidate) {
+        return Err("no es un .png de los assets de una página");
     }
     Ok(candidate)
 }
 
 fn inside_docs_root(rel_path: &str) -> Result<PathBuf, Problem> {
+    resolve_inside(rel_path, doc_shaped)
+}
+
+fn resolve_inside(rel_path: &str, shape: fn(&str) -> Result<&Path, &'static str>) -> Result<PathBuf, Problem> {
     let refused = |reason: &str| {
         Problem::new(
             ProblemKind::CliFailed,
@@ -235,7 +311,7 @@ fn inside_docs_root(rel_path: &str) -> Result<PathBuf, Problem> {
         )
     };
 
-    let candidate = doc_shaped(rel_path).map_err(refused)?;
+    let candidate = shape(rel_path).map_err(refused)?;
 
     let root = cli::docs_root();
     let target = root.join(candidate);
@@ -319,6 +395,31 @@ mod tests {
         assert_eq!(super::backlog_action("resolved").ok(), Some("resolve"));
         assert_eq!(super::backlog_action("open").ok(), Some("reopen"));
         assert!(super::backlog_action("rm").is_err());
+    }
+
+    #[test]
+    fn base64_matches_the_standard_alphabet_and_padding() {
+        assert_eq!(super::base64(b""), "");
+        assert_eq!(super::base64(b"f"), "Zg==");
+        assert_eq!(super::base64(b"fo"), "Zm8=");
+        assert_eq!(super::base64(b"foo"), "Zm9v");
+        assert_eq!(super::base64(&[0x89, 0x50, 0x4e, 0x47]), "iVBORw==");
+    }
+
+    #[test]
+    fn only_pngs_inside_a_page_assets_folder_are_images() {
+        assert!(super::image_shaped("dportenis/aws.assets/red.png").is_ok());
+        assert!(super::image_shaped("dportenis/aws.assets/red.drawio").is_err());
+        assert!(super::image_shaped("dportenis/red.png").is_err());
+        assert!(super::image_shaped("dportenis/aws.assets/../../x.png").is_err());
+        assert!(super::image_shaped("/etc/aws.assets/x.png").is_err());
+    }
+
+    #[test]
+    fn a_drawio_source_opens_only_from_a_page_assets_folder() {
+        assert!(doc_shaped("dportenis/aws.assets/red.drawio").is_ok());
+        assert!(doc_shaped("dportenis/red.drawio").is_err());
+        assert!(doc_shaped("dportenis/aws.assets/red.sh").is_err());
     }
 
     #[test]

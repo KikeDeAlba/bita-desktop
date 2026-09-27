@@ -61,6 +61,7 @@ fn main() {
             notes_cmd::backlog_list,
             notes_cmd::backlog_set_status,
             notes_cmd::open_document,
+            notes_cmd::page_asset,
             notes_cmd::open_external,
             notes_cmd::copy_text,
             commands::quit
