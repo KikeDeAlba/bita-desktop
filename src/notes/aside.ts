@@ -1,4 +1,4 @@
-import type { DocHeading, PageDocument, PageEntryRow, PageIssue } from '../bita.ts'
+import type { DocHeading, PageBacklogItem, PageDocument, PageEntryRow, PageIssue, PageRef } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 
 export interface AsideHandlers {
@@ -6,6 +6,7 @@ export interface AsideHandlers {
   onIssue: (url: string) => void
   onChild: (pageId: number) => void
   onEntry: (entryId: number) => void
+  onBacklog: () => void
   onCollapse: () => void
   onExpand: () => void
 }
@@ -55,6 +56,17 @@ export function renderAside(host: HTMLElement, state: AsideState, handlers: Asid
   if (page.children.length > 0) {
     body.append(divider())
     body.append(childrenBlock(page, handlers))
+  }
+
+  const open = (page.backlog ?? []).filter((item) => item.status === 'open')
+  if (open.length > 0) {
+    body.append(divider())
+    body.append(backlogBlock(open, handlers))
+  }
+
+  if ((page.refs ?? []).length > 0) {
+    body.append(divider())
+    body.append(refsBlock(page.refs ?? [], handlers))
   }
 
   if (page.entries.length > 0) {
@@ -163,6 +175,61 @@ function childrenBlock(page: PageDocument, handlers: AsideHandlers): HTMLElement
     block.append(row)
   }
   return block
+}
+
+function backlogBlock(items: PageBacklogItem[], handlers: AsideHandlers): HTMLElement {
+  const block = element('div', 'aside-block')
+  const head = document.createElement('button')
+  head.type = 'button'
+  head.className = 'aside-label-link'
+  head.append(element('span', 'aside-label', 'Pendientes y hallazgos'), element('span', 'log-total', String(items.length)))
+  head.addEventListener('click', handlers.onBacklog)
+  block.append(head)
+
+  for (const item of items) {
+    const row = element('div', 'aside-backlog-row')
+    row.append(element('span', `backlog-kind backlog-kind--${item.kind}`, item.kind === 'pending' ? 'P' : 'H'))
+    row.append(element('span', 'aside-backlog-text', item.title))
+    block.append(row)
+  }
+  return block
+}
+
+const REF_LABEL: Record<PageRef['kind'], string> = {
+  confluence: 'Confluence',
+  jira: 'Jira',
+  drive: 'Drive',
+  link: 'Enlace',
+}
+
+function refsBlock(refs: PageRef[], handlers: AsideHandlers): HTMLElement {
+  const block = element('div', 'aside-block')
+  block.append(element('div', 'aside-label', 'Enlaces'))
+
+  for (const ref of refs) {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'issue-row'
+    row.title = ref.url
+    const text = element('span', 'issue-text')
+    text.append(element('span', 'issue-key', REF_LABEL[ref.kind]))
+    text.append(element('span', 'issue-summary', ref.title.length > 0 ? ref.title : shortUrl(ref.url)))
+    row.append(text, icon('external', 11))
+    row.addEventListener('click', () => {
+      handlers.onIssue(ref.url)
+    })
+    block.append(row)
+  }
+  return block
+}
+
+function shortUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    return `${parsed.hostname}${parsed.pathname}`.slice(0, 60)
+  } catch {
+    return url.slice(0, 60)
+  }
 }
 
 function logBlock(entries: PageEntryRow[], state: AsideState, handlers: AsideHandlers): HTMLElement {

@@ -1253,3 +1253,248 @@ body:has(#notas) {
   transform-origin: center center;
   will-change: transform;
 }
+
+#notas .backlog-row {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  padding: 7px 6px;
+  border-radius: var(--radius-control);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--fg);
+  text-align: left;
+}
+
+#notas .backlog-row:hover {
+  background: var(--card);
+}
+
+#notas .backlog-row--on {
+  background: var(--card);
+  color: var(--fg-bright);
+}
+
+#notas .backlog-row-icon {
+  display: inline-flex;
+  color: var(--estimate);
+}
+
+#notas .backlog-row-name {
+  flex-grow: 1;
+}
+
+#notas .backlog-header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#notas .backlog-filters {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+#notas .backlog-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--elev);
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--fg-dim);
+}
+
+#notas .backlog-chip:hover {
+  background: var(--card);
+}
+
+#notas .backlog-chip--on {
+  background: var(--elev);
+  border-color: var(--elev-strong);
+  color: var(--fg-bright);
+}
+
+#notas .backlog-chip-count {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-mute);
+}
+
+#notas .backlog-empty {
+  margin: 8px 0;
+  font-size: 12.5px;
+  color: var(--fg-mute);
+}
+
+#notas .backlog-project {
+  margin-bottom: 26px;
+}
+
+#notas .backlog-project-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 1.05em;
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+#notas .backlog-project-name {
+  flex-grow: 1;
+}
+
+#notas .backlog-project-count {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--fg-mute);
+}
+
+#notas .backlog-page {
+  margin: 0 0 14px 14px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+#notas .backlog-page-link {
+  display: inline-block;
+  margin-bottom: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--blue);
+  text-align: left;
+}
+
+#notas button.backlog-page-link:hover {
+  text-decoration: underline;
+}
+
+#notas .backlog-page-link--none {
+  color: var(--fg-mute);
+}
+
+#notas .backlog-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 6px 0;
+}
+
+#notas .backlog-check {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--elev-strong);
+  border-radius: 4px;
+  color: var(--bg);
+}
+
+#notas .backlog-check:hover:not(:disabled) {
+  border-color: var(--ok);
+}
+
+#notas .backlog-check:disabled {
+  opacity: 0.5;
+}
+
+#notas .backlog-item--done .backlog-check {
+  background: var(--ok);
+  border-color: var(--ok);
+}
+
+#notas .backlog-text {
+  min-width: 0;
+  flex-grow: 1;
+}
+
+#notas .backlog-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font-size: 1em;
+  line-height: 1.45;
+  color: var(--fg);
+}
+
+#notas .backlog-title:disabled {
+  cursor: auto;
+}
+
+#notas .backlog-item--done .backlog-title-text {
+  color: var(--fg-mute);
+  text-decoration: line-through;
+}
+
+#notas .backlog-kind {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+#notas .backlog-kind--pending {
+  background: rgba(250, 189, 47, 0.16);
+  color: var(--estimate);
+}
+
+#notas .backlog-kind--finding {
+  background: rgba(211, 134, 155, 0.16);
+  color: var(--purple);
+}
+
+#notas .backlog-body,
+#notas .backlog-resolution {
+  margin: 6px 0 0;
+  font-size: 0.92em;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  color: var(--fg-dim);
+  user-select: text;
+}
+
+#notas .backlog-resolution {
+  color: var(--ok);
+}
+
+#notas .aside-label-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+}
+
+#notas .aside-label-link:hover .aside-label {
+  color: var(--fg-bright);
+}
+
+#notas .aside-backlog-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 0;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--fg-dim);
+}
+
+#notas .aside-backlog-text {
+  min-width: 0;
+}

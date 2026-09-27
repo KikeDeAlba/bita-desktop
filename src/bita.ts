@@ -380,12 +380,53 @@ export interface PageChild extends PageCrumb {
   relPath: string
 }
 
+export type RefKind = 'confluence' | 'jira' | 'drive' | 'link'
+
+export interface PageRef {
+  url: string
+  title: string
+  kind: RefKind
+  source: 'manual' | 'hook'
+  firstSeenAt: string
+  lastSeenAt: string
+}
+
+export type BacklogKind = 'pending' | 'finding'
+export type BacklogStatus = 'open' | 'resolved'
+
+export interface PageBacklogItem {
+  id: number
+  kind: BacklogKind
+  status: BacklogStatus
+  title: string
+  body: string
+  resolution: string
+  createdAt: string
+  resolvedAt: string | null
+}
+
+export interface BacklogItem extends PageBacklogItem {
+  projectId: number | null
+  projectName: string | null
+  pageId: number | null
+  pageTitle: string | null
+  entryId: number | null
+  source: 'manual' | 'extracted'
+  updatedAt: string
+}
+
+export interface BacklogMeta {
+  counts: { pending: number; finding: number; resolved: number }
+}
+
 export interface PageDocument extends Omit<PageNode, 'children'> {
   ancestors: PageCrumb[]
   children: PageChild[]
   doc: PageDoc
   entries: PageEntryRow[]
   worklogIssues: string[]
+  refs?: PageRef[]
+  backlog?: PageBacklogItem[]
 }
 
 export interface SearchMatch {
@@ -468,6 +509,14 @@ export function notesSearch(
   project: string | null,
 ): Promise<CliPayload<SearchHit[], SearchMeta>> {
   return invoke('notes_search', { query, project })
+}
+
+export function backlogList(): Promise<CliPayload<BacklogItem[], BacklogMeta>> {
+  return invoke('backlog_list')
+}
+
+export function backlogSetStatus(id: number, status: BacklogStatus): Promise<CliPayload<BacklogItem, unknown>> {
+  return invoke('backlog_set_status', { id, status })
 }
 
 export function openDocument(relPath: string): Promise<void> {

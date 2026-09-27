@@ -2,13 +2,14 @@ import type { PageNode, SearchHit, Space } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import { projectColor } from '../tabs.ts'
 
-export type Selection = { kind: 'page' | 'entry'; id: number } | null
+export type Selection = { kind: 'page' | 'entry' | 'backlog'; id: number } | null
 
 export interface RailHandlers {
   onQuery: (value: string) => void
   onToggle: (key: string) => void
   onSelectPage: (pageId: number) => void
   onSelectEntry: (entryId: number) => void
+  onSelectBacklog: () => void
   onCollapse: () => void
 }
 
@@ -21,6 +22,23 @@ export interface RailState {
   pageCount: number
   loading: boolean
   open: boolean
+  backlogOpen: number | null
+}
+
+function backlogRow(state: RailState, handlers: RailHandlers): HTMLElement {
+  const on = state.selected?.kind === 'backlog'
+  const row = document.createElement('button')
+  row.type = 'button'
+  row.className = on ? 'backlog-row backlog-row--on' : 'backlog-row'
+  row.setAttribute('aria-current', String(on))
+  const glyph = element('span', 'backlog-row-icon')
+  glyph.append(icon('inbox', 13))
+  row.append(glyph, element('span', 'backlog-row-name', 'Pendientes y hallazgos'))
+  if (state.backlogOpen !== null && state.backlogOpen > 0) {
+    row.append(element('span', 'project-count', String(state.backlogOpen)))
+  }
+  row.addEventListener('click', handlers.onSelectBacklog)
+  return row
 }
 
 export function spaceKey(space: Space): string {
@@ -42,8 +60,12 @@ export function renderRail(host: HTMLElement, state: RailState, handlers: RailHa
   const standing = host.querySelector<HTMLInputElement>('#rail-query')
   const body = standing === null ? freshChrome(host, state, handlers) : keepChrome(host, standing, state)
 
-  if (state.query.trim().length > 0) renderResults(body, state, handlers)
-  else renderTree(body, state, handlers)
+  if (state.query.trim().length > 0) {
+    renderResults(body, state, handlers)
+    return
+  }
+  body.append(backlogRow(state, handlers))
+  renderTree(body, state, handlers)
 }
 
 function freshChrome(host: HTMLElement, state: RailState, handlers: RailHandlers): HTMLElement {
@@ -104,6 +126,14 @@ function keepChrome(host: HTMLElement, input: HTMLInputElement, state: RailState
 function collapsedStrip(state: RailState, handlers: RailHandlers): HTMLElement {
   const strip = element('div', 'rail-strip')
   strip.setAttribute('data-tauri-drag-region', '')
+
+  const inbox = document.createElement('button')
+  inbox.type = 'button'
+  inbox.className = 'strip-icon'
+  inbox.setAttribute('aria-label', 'Pendientes y hallazgos')
+  inbox.append(icon('inbox', 14))
+  inbox.addEventListener('click', handlers.onSelectBacklog)
+  strip.append(inbox)
 
   for (const space of state.spaces) {
     if (space.pageCount === 0) continue

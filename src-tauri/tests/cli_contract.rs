@@ -134,3 +134,56 @@ fn the_vendored_cli_still_resolves_the_seven_sections() {
 
     let _ = fs::remove_file(&database);
 }
+
+#[test]
+fn the_vendored_cli_lists_the_backlog_the_app_paints() {
+    let entry = vendored_cli();
+    assert!(entry.is_file(), "the bita submodule is not checked out");
+
+    let Some(node) = node() else {
+        panic!("no node found; this app cannot work without one");
+    };
+
+    let database = env::temp_dir().join(format!("bita-contract-backlog-{}.db", std::process::id()));
+    let _ = fs::remove_file(&database);
+
+    let run = |args: &[&str]| -> serde_json::Value {
+        let output = Command::new(&node)
+            .arg(&entry)
+            .args(args)
+            .arg("--json")
+            .arg("--db-path")
+            .arg(&database)
+            .current_dir("/")
+            .stdin(Stdio::null())
+            .output()
+            .expect("run the vendored CLI");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        serde_json::from_str(stdout.trim()).expect("the CLI printed one JSON document")
+    };
+
+    let project = run(&["project", "add", "Contrato"]);
+    assert_eq!(project["ok"].as_bool(), Some(true), "{project}");
+
+    let added = run(&[
+        "backlog", "add", "--kind", "pending", "--title", "Rotar el secreto", "--project", "Contrato",
+    ]);
+    assert_eq!(added["ok"].as_bool(), Some(true), "{added}");
+    let id = added["data"]["id"].as_i64().expect("the new item has an id").to_string();
+
+    let resolved = run(&["backlog", "resolve", &id]);
+    assert_eq!(resolved["data"]["status"].as_str(), Some("resolved"));
+
+    let listed = run(&["backlog", "ls", "--status", "all"]);
+    assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+    let item = &listed["data"][0];
+    for field in [
+        "id", "kind", "status", "title", "body", "projectName", "pageId", "pageTitle", "updatedAt",
+        "resolution",
+    ] {
+        assert!(item.get(field).is_some(), "backlog items lost {field}: {item}");
+    }
+    assert_eq!(listed["meta"]["counts"]["resolved"].as_u64(), Some(1));
+
+    let _ = fs::remove_file(&database);
+}
