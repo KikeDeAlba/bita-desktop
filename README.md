@@ -273,6 +273,14 @@ encajarlo, y `Esc` cierra. La copia que se muestra va en su propio shadow root,
 igual que la incrustada, para que el `<style>` de Mermaid no se escape al
 documento.
 
+Los diagramas de draw.io llegan como un bloque ```` ```drawio ```` que nombra un
+`.drawio` guardado en `<página>.assets/`. La app no los dibuja: enseña el PNG
+que genera `bita docs diagrams render`, con el mismo lightbox. El PNG lo lee
+Rust (`page_asset`, solo `.png` dentro de una carpeta `.assets` del directorio
+de docs, hasta 10 MB) y lo pasa como `data:` URL, así que la CSP no cambia. Sin
+render, la figura dice qué comando correr, y «Abrir en draw.io» abre el `.drawio`
+para editarlo.
+
 Un diagrama que no compila no puede tumbar el lector: cae al bloque de código
 con el motivo. Hay tope de 20 KB de fuente y 20 diagramas por página.
 

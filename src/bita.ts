@@ -519,6 +519,10 @@ export function backlogSetStatus(id: number, status: BacklogStatus): Promise<Cli
   return invoke('backlog_set_status', { id, status })
 }
 
+export function pageAsset(relPath: string): Promise<string | null> {
+  return invoke<string | null>('page_asset', { relPath })
+}
+
 export function openDocument(relPath: string): Promise<void> {
   return invoke<void>('open_document', { relPath })
 }

@@ -4,6 +4,7 @@ import { renderMarkdown } from './markdown.ts'
 import { resetPage } from './mermaid.ts'
 import { anchorOf } from './sections.ts'
 import { proseControl } from './prose.ts'
+import { assetsRelDirOf } from './drawio.ts'
 
 export interface ReaderHandlers {
   onPrev: () => void
@@ -201,10 +202,20 @@ function body(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
 }
 
 function render(markdown: string, state: ReaderState, handlers: ReaderHandlers, className?: string): Node {
+  const page = state.page
   const rendered = renderMarkdown(markdown, {
     ...(state.query.trim().length > 0 ? { highlight: state.query.trim() } : {}),
     onLink: handlers.onOpenExternal,
     onCopy: handlers.onCopy,
+    ...(page !== null
+      ? {
+          drawio: {
+            pageId: page.pageId,
+            assetsRelDir: assetsRelDirOf(page.doc.relPath),
+            onOpen: handlers.onOpenDocument,
+          },
+        }
+      : {}),
   })
   if (className === undefined) return rendered
   const wrap = element('div', className)
