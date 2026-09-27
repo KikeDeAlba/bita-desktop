@@ -1213,7 +1213,9 @@ body.resizing * {
 
 #notas .md-mermaid-stage--ready {
   cursor: zoom-in;
+  padding: 14px;
   border-radius: var(--radius-control);
+  background: #ffffff;
 }
 
 #notas .md-mermaid-stage--ready:hover {
@@ -1309,6 +1311,9 @@ body.resizing * {
 .lightbox-stage {
   transform-origin: center center;
   will-change: transform;
+  padding: 24px;
+  border-radius: var(--radius-card);
+  background: #ffffff;
 }
 
 #notas .backlog-row {

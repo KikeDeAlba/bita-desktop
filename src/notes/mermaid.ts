@@ -8,10 +8,6 @@ const PER_PAGE_MAX = 20
 let ready: Promise<typeof import('mermaid').default> | null = null
 let drawn = 0
 
-function token(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-}
-
 async function engine(): Promise<typeof import('mermaid').default> {
   if (ready !== null) return ready
 
@@ -19,21 +15,13 @@ async function engine(): Promise<typeof import('mermaid').default> {
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
-      theme: 'base',
+      theme: 'default',
+      darkMode: false,
       fontFamily: "'Instrument Sans', system-ui, sans-serif",
       flowchart: { htmlLabels: false },
       class: { htmlLabels: false },
       themeVariables: {
-        background: token('--inset'),
-        mainBkg: token('--card'),
-        primaryColor: token('--card'),
-        primaryTextColor: token('--fg-bright'),
-        primaryBorderColor: token('--elev-strong'),
-        secondaryColor: token('--blue'),
-        tertiaryColor: token('--aqua'),
-        lineColor: token('--fg-mute'),
-        textColor: token('--fg'),
-        errorBkgColor: token('--danger'),
+        background: '#ffffff',
         fontSize: '13px',
       },
       themeCSS: "text, .label { font-family: 'Instrument Sans', system-ui, sans-serif; }",
