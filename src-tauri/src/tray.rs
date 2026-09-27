@@ -78,7 +78,7 @@ fn remember(app: &AppHandle, event: &TrayIconEvent) {
 
 pub fn set_title(app: &AppHandle, title: &str) {
     if let Some(tray) = app.tray_by_id(ID) {
-        let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
+        let _ = tray.set_title(Some(title));
     }
 }
 
