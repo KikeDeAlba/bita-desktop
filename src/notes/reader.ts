@@ -3,6 +3,7 @@ import { element, icon } from '../dom.ts'
 import { renderMarkdown } from './markdown.ts'
 import { resetPage } from './mermaid.ts'
 import { anchorOf } from './sections.ts'
+import { proseControl } from './prose.ts'
 
 export interface ReaderHandlers {
   onPrev: () => void
@@ -86,6 +87,8 @@ function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
     nav.append(iconAction('down', 'Coincidencia siguiente', () => handlers.onHit(1)))
     row.append(nav)
   }
+
+  if (page !== null) row.append(proseControl())
 
   row.append(iconAction('prev', 'Página anterior', handlers.onPrev, !state.canPrev))
   row.append(iconAction('next', 'Página siguiente', handlers.onNext, !state.canNext))
