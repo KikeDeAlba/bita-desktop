@@ -7,8 +7,7 @@ body:has(#notas) {
   --aside-open: 200px;
   --rail-w: var(--rail-open);
   --aside-w: var(--aside-open);
-  --prose-w: 720px;
-  --wide-w: 1180px;
+  --prose-w: 960px;
   --doc-scale: 1;
   position: relative;
   height: 100%;
@@ -512,12 +511,11 @@ body.resizing * {
   flex-grow: 1;
   min-height: 0;
   overflow: hidden auto;
-  container-type: inline-size;
+
   padding: 22px 24px 28px;
 }
 
 #notas .article {
-  --wide: min(100cqi, var(--wide-w));
   min-width: 0;
   max-width: var(--prose-w);
   margin: 0 auto;
@@ -1131,8 +1129,7 @@ body.resizing * {
 
 #notas .article .md-table-scroll,
 #notas .article .md-mermaid {
-  width: max(100%, var(--wide));
-  margin-inline: min(0px, calc((100% - var(--wide)) / 2));
+  width: 100%;
   box-sizing: border-box;
 }
 

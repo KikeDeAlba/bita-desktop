@@ -189,10 +189,10 @@ de la pantalla, si es más chica), de solo lectura: escribir sigue siendo del
 CLI, que es quien tiene el lock cooperativo, salvo marcar un pendiente como
 resuelto.
 
-La prosa va en una columna de 720 px, y las tablas y los diagramas se abren a
-todo el ancho del lector. El árbol y el panel lateral se redimensionan
-arrastrando su borde; el ancho se recuerda y el doble clic lo devuelve al de
-fábrica.
+El texto, las tablas y los diagramas comparten una sola columna, de 960 px por
+defecto. El control de la barra del lector, o `cmd ]` y `cmd [`, la lleva de
+560 px a todo el ancho; el doble clic la devuelve a 960. El árbol y el panel
+lateral se redimensionan arrastrando su borde. Los tres anchos se recuerdan.
 
 **Pendientes y hallazgos** es una vista propia, fija sobre el árbol: la lista
 del backlog de bita de todos los proyectos, agrupada por proyecto y página, con

@@ -3,7 +3,7 @@ import { element } from '../dom.ts'
 const KEY = 'bita.notes.prose-width'
 export const PROSE_MIN = 560
 export const PROSE_MAX = 1600
-export const PROSE_DEFAULT = 720
+export const PROSE_DEFAULT = 960
 const STEP = 40
 
 let current = PROSE_DEFAULT
