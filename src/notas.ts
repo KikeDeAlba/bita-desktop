@@ -24,6 +24,7 @@ import { must } from './dom.ts'
 import { renderAside, type AsideState } from './notes/aside.ts'
 import { renderRail, pageKey, spaceKey, type RailState, type Selection } from './notes/rail.ts'
 import { renderReader, type ReaderState } from './notes/reader.ts'
+import { attachSash } from './notes/sash.ts'
 import { openCount, renderBacklog, type BacklogFilter, type BacklogState } from './notes/backlog.ts'
 
 const railHost = must<HTMLElement>('#rail')
@@ -612,8 +613,37 @@ function keys(event: KeyboardEvent): void {
   }
 }
 
+function attachSashes(): void {
+  const root = must<HTMLElement>('#notas')
+  attachSash({
+    handle: must<HTMLElement>('#sash-rail'),
+    root,
+    variable: '--rail-open',
+    side: 'left',
+    storageKey: 'bita.notes.rail-width',
+    initial: 220,
+    min: 160,
+    max: 520,
+    readerMin: 420,
+    otherWidth: () => asideHost.getBoundingClientRect().width,
+  })
+  attachSash({
+    handle: must<HTMLElement>('#sash-aside'),
+    root,
+    variable: '--aside-open',
+    side: 'right',
+    storageKey: 'bita.notes.aside-width',
+    initial: 200,
+    min: 160,
+    max: 440,
+    readerMin: 420,
+    otherWidth: () => railHost.getBoundingClientRect().width,
+  })
+}
+
 async function start(): Promise<void> {
   applyScale(scale)
+  attachSashes()
   window.addEventListener('keydown', keys)
   onDocsChanged(() => {
     void loadTree()

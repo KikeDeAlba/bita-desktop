@@ -3,15 +3,68 @@ body:has(#notas) {
 }
 
 #notas {
-  --rail-w: 220px;
-  --aside-w: 200px;
+  --rail-open: 220px;
+  --aside-open: 200px;
+  --rail-w: var(--rail-open);
+  --aside-w: var(--aside-open);
   --prose-w: 720px;
   --wide-w: 1180px;
   --doc-scale: 1;
+  position: relative;
   height: 100%;
   display: grid;
   grid-template-columns: var(--rail-w) minmax(0, 1fr) var(--aside-w);
   background: var(--bg);
+}
+
+#notas .sash {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 5;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+#notas .sash::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+#notas .sash:hover::after,
+#notas .sash:focus-visible::after,
+#notas .sash--dragging::after {
+  background: var(--blue);
+}
+
+#notas .sash:focus-visible {
+  outline: none;
+}
+
+#notas .sash--rail {
+  left: calc(var(--rail-w) - 5px);
+}
+
+#notas .sash--aside {
+  right: calc(var(--aside-w) - 5px);
+}
+
+#notas:has(.rail--closed) .sash--rail,
+#notas:has(.aside--closed) .sash--aside {
+  display: none;
+}
+
+body.resizing,
+body.resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 #notas:has(.rail--closed) {
@@ -1091,6 +1144,10 @@ body:has(#notas) {
 @media (max-width: 1100px) {
   #notas {
     --aside-w: 40px;
+  }
+
+  #notas .sash--aside {
+    display: none;
   }
 }
 
