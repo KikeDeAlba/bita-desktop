@@ -24,12 +24,25 @@ const LABEL_TAGS = new Set([
   'th',
 ])
 
-export function adoptSvg(source: string): SVGElement | null {
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+function parseAsXml(source: string): Element | null {
   const parsed = new DOMParser().parseFromString(source, 'image/svg+xml')
   if (parsed.getElementsByTagName('parsererror').length > 0) return null
+  return parsed.documentElement
+}
 
-  const root = parsed.documentElement
-  if (root.tagName.toLowerCase() !== 'svg') return null
+function parseAsHtml(source: string): Element | null {
+  const parsed = new DOMParser().parseFromString(`<!doctype html><body>${source}</body>`, 'text/html')
+  const root = parsed.body.firstElementChild
+  if (root === null || parsed.body.children.length !== 1) return null
+  return root
+}
+
+export function adoptSvg(source: string): SVGElement | null {
+  const root = parseAsXml(source) ?? parseAsHtml(source)
+  if (root === null) return null
+  if (root.tagName.toLowerCase() !== 'svg' || root.namespaceURI !== SVG_NS) return null
 
   scrub(root)
   return document.importNode(root, true) as unknown as SVGElement
