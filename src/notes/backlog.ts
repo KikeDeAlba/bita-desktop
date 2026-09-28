@@ -1,84 +1,176 @@
-import type { BacklogItem, BacklogStatus, Problem } from '../bita.ts'
+import type { BacklogItem, Problem } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import { projectColor } from '../tabs.ts'
 
-export type BacklogFilter = 'pending' | 'finding' | 'resolved'
+export type BacklogTab = 'finding' | 'pending' | 'resolved'
+
+export const ALL_PROJECTS = 'all'
+export const NO_PROJECT = 'none'
 
 export interface BacklogState {
   items: BacklogItem[] | null
-  filter: BacklogFilter
+  tab: BacklogTab
+  project: string
+  query: string
+  selectedId: number | null
+  draft: string
+  copied: string | null
   failure: Problem | null
   busy: Set<number>
-  expanded: Set<number>
   railOpen: boolean
+  now: Date
 }
 
 export interface BacklogHandlers {
-  onFilter: (filter: BacklogFilter) => void
-  onStatus: (id: number, status: BacklogStatus) => void
-  onToggleItem: (id: number) => void
+  onTab: (tab: BacklogTab) => void
+  onProject: (project: string) => void
+  onQuery: (query: string) => void
+  onSelect: (id: number) => void
+  onDraft: (text: string) => void
+  onResolve: (id: number) => void
+  onReopen: (id: number) => void
+  onToPending: (id: number) => void
   onOpenPage: (pageId: number) => void
+  onCopy: (text: string) => void
   onExpandRail: () => void
 }
 
-const FILTERS: { key: BacklogFilter; label: string }[] = [
-  { key: 'pending', label: 'Pendientes' },
+const TABS: { key: BacklogTab; label: string }[] = [
   { key: 'finding', label: 'Hallazgos' },
+  { key: 'pending', label: 'Pendientes' },
   { key: 'resolved', label: 'Resueltos' },
 ]
 
-export function matchesFilter(item: BacklogItem, filter: BacklogFilter): boolean {
-  if (filter === 'resolved') return item.status === 'resolved'
-  return item.status === 'open' && item.kind === filter
+const OLD_DAYS = 14
+const DAY_MS = 86_400_000
+
+export function itemKey(item: { id: number; key?: string }): string {
+  return item.key ?? `#${item.id}`
+}
+
+export function tabOf(item: BacklogItem): BacklogTab {
+  return item.status === 'resolved' ? 'resolved' : item.kind
+}
+
+export function projectOf(item: BacklogItem): string {
+  return item.projectId === null ? NO_PROJECT : String(item.projectId)
 }
 
 export function openCount(items: BacklogItem[] | null): number {
   return (items ?? []).filter((item) => item.status === 'open').length
 }
 
-interface PageGroup {
-  pageId: number | null
-  title: string
-  items: BacklogItem[]
+export function findByKey(items: BacklogItem[] | null, query: string): BacklogItem | undefined {
+  const wanted = query.trim().replace(/^#/, '').toUpperCase()
+  if (wanted.length === 0) return undefined
+  return (items ?? []).find(
+    (item) => itemKey(item).replace(/^#/, '').toUpperCase() === wanted || String(item.id) === wanted,
+  )
 }
 
-interface ProjectGroup {
+function matchesQuery(item: BacklogItem, query: string): boolean {
+  const needle = query.trim().toLowerCase()
+  if (needle.length === 0) return true
+  return [itemKey(item), item.title, item.pageTitle ?? '', item.projectName ?? '']
+    .some((field) => field.toLowerCase().includes(needle))
+}
+
+function byProject(left: BacklogItem, right: BacklogItem): number {
+  const name = (left.projectName ?? '\uffff').localeCompare(right.projectName ?? '\uffff', 'es')
+  if (name !== 0) return name
+  if (left.status === 'resolved' && right.status === 'resolved') {
+    return (right.resolvedAt ?? '').localeCompare(left.resolvedAt ?? '')
+  }
+  return left.createdAt.localeCompare(right.createdAt) || left.id - right.id
+}
+
+export function visibleItems(state: BacklogState): BacklogItem[] {
+  return (state.items ?? [])
+    .filter((item) => tabOf(item) === state.tab)
+    .filter((item) => state.project === ALL_PROJECTS || projectOf(item) === state.project)
+    .filter((item) => matchesQuery(item, state.query))
+    .sort(byProject)
+}
+
+export function selectedItem(state: BacklogState): BacklogItem | undefined {
+  const visible = visibleItems(state)
+  return visible.find((item) => item.id === state.selectedId) ?? visible[0]
+}
+
+interface ProjectChip {
+  value: string
+  label: string
   projectId: number | null
-  name: string
-  pages: PageGroup[]
   count: number
 }
 
-export function groupItems(items: BacklogItem[]): ProjectGroup[] {
-  const projects = new Map<string, ProjectGroup>()
-  for (const item of items) {
-    const projectKey = String(item.projectId ?? 'none')
-    let project = projects.get(projectKey)
-    if (!project) {
-      project = { projectId: item.projectId, name: item.projectName ?? 'Sin proyecto', pages: [], count: 0 }
-      projects.set(projectKey, project)
+function projectChips(state: BacklogState): ProjectChip[] {
+  const inTab = (state.items ?? []).filter((item) => tabOf(item) === state.tab)
+  const chips = new Map<string, ProjectChip>()
+  for (const item of state.items ?? []) {
+    const value = projectOf(item)
+    if (!chips.has(value)) {
+      chips.set(value, { value, label: item.projectName ?? 'Sin proyecto', projectId: item.projectId, count: 0 })
     }
-    let page = project.pages.find((candidate) => candidate.pageId === item.pageId)
-    if (!page) {
-      page = { pageId: item.pageId, title: item.pageTitle ?? 'Sin página', items: [] }
-      project.pages.push(page)
-    }
-    page.items.push(item)
-    project.count += 1
   }
-  const groups = [...projects.values()]
-  for (const group of groups) {
-    group.pages.sort((left, right) => {
-      if (left.pageId === null) return 1
-      if (right.pageId === null) return -1
-      return left.title.localeCompare(right.title, 'es')
-    })
+  for (const item of inTab) {
+    const chip = chips.get(projectOf(item))
+    if (chip) chip.count += 1
   }
-  return groups.sort((left, right) => left.name.localeCompare(right.name, 'es'))
+  const listed = [...chips.values()]
+    .filter((chip) => chip.count > 0 || chip.value === state.project)
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, 'es'))
+  return [{ value: ALL_PROJECTS, label: 'Todos', projectId: null, count: inTab.length }, ...listed]
+}
+
+function daysSince(iso: string, now: Date): number {
+  const then = Date.parse(iso)
+  if (Number.isNaN(then)) return 0
+  return Math.max(0, Math.floor((now.getTime() - then) / DAY_MS))
+}
+
+function shortAge(days: number): string {
+  return days === 0 ? 'hoy' : `${days}d`
+}
+
+function longAge(days: number): string {
+  if (days === 0) return 'hoy'
+  return days === 1 ? 'hace 1 día' : `hace ${days} días`
 }
 
 export function renderBacklog(host: HTMLElement, state: BacklogState, handlers: BacklogHandlers): void {
-  const bar = element('div', 'reader-bar')
+  const focus = rememberFocus()
+  const inbox = element('div', 'inbox')
+  inbox.append(listPane(state, handlers), detailPane(state, handlers))
+  host.replaceChildren(inbox)
+  restoreFocus(host, focus)
+}
+
+interface FocusMemo {
+  id: string
+  start: number | null
+  end: number | null
+}
+
+function rememberFocus(): FocusMemo | null {
+  const active = document.activeElement
+  if (!(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) || active.id === '') return null
+  return { id: active.id, start: active.selectionStart, end: active.selectionEnd }
+}
+
+function restoreFocus(host: HTMLElement, memo: FocusMemo | null): void {
+  if (memo === null) return
+  const target = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(`#${CSS.escape(memo.id)}`)
+  if (target === null) return
+  target.focus()
+  if (memo.start !== null && memo.end !== null) target.setSelectionRange(memo.start, memo.end)
+}
+
+function listPane(state: BacklogState, handlers: BacklogHandlers): HTMLElement {
+  const pane = element('section', 'inbox-list')
+  pane.setAttribute('aria-label', 'Pendientes y hallazgos')
+
+  const bar = element('div', 'reader-bar inbox-bar')
   bar.setAttribute('data-tauri-drag-region', '')
   if (!state.railOpen) {
     const unfold = document.createElement('button')
@@ -89,122 +181,294 @@ export function renderBacklog(host: HTMLElement, state: BacklogState, handlers: 
     unfold.addEventListener('click', handlers.onExpandRail)
     bar.append(unfold)
   }
-  bar.append(element('span', 'reader-crumb', 'Pendientes y hallazgos de todos los proyectos'))
+  bar.append(tabList(state, handlers))
+  pane.append(bar)
 
-  const header = element('div', 'doc-header backlog-header')
-  header.append(element('h1', 'doc-title', 'Pendientes y hallazgos'))
+  const filters = element('div', 'inbox-filters')
+  const field = element('label', 'search-field inbox-search')
+  const glass = element('span', 'search-glass')
+  glass.append(icon('search', 12))
+  const input = document.createElement('input')
+  input.type = 'search'
+  input.id = 'inbox-query'
+  input.placeholder = 'Filtrar, o ir a un ID como STI-14'
+  input.autocomplete = 'off'
+  input.spellcheck = false
+  input.value = state.query
+  input.setAttribute('aria-label', 'Filtrar por título o ID')
+  input.addEventListener('input', () => {
+    handlers.onQuery(input.value)
+  })
+  field.append(glass, input)
+  filters.append(field, chipRow(state, handlers))
+  pane.append(filters)
 
-  const chips = element('div', 'backlog-filters')
-  chips.setAttribute('role', 'tablist')
-  for (const filter of FILTERS) {
-    const count = (state.items ?? []).filter((item) => matchesFilter(item, filter.key)).length
-    const chip = document.createElement('button')
-    chip.type = 'button'
-    chip.className = filter.key === state.filter ? 'backlog-chip backlog-chip--on' : 'backlog-chip'
-    chip.setAttribute('role', 'tab')
-    chip.setAttribute('aria-selected', String(filter.key === state.filter))
-    chip.append(element('span', '', filter.label), element('span', 'backlog-chip-count', String(count)))
-    chip.addEventListener('click', () => {
-      handlers.onFilter(filter.key)
-    })
-    chips.append(chip)
-  }
-  header.append(chips)
-
-  const body = element('div', 'doc-body')
-  const article = element('div', 'article backlog')
-
-  if (state.failure) {
-    const problem = element('div', 'problem')
-    problem.append(element('p', 'problem-message', state.failure.message))
-    if (state.failure.hint) problem.append(element('p', 'problem-hint', state.failure.hint))
-    article.append(problem)
+  const body = element('div', 'inbox-items')
+  if (state.failure && state.items === null) {
+    body.append(problemBlock(state.failure))
   } else if (state.items === null) {
-    article.append(element('p', 'backlog-empty', 'Leyendo el backlog…'))
+    body.append(element('p', 'inbox-empty', 'Leyendo el backlog…'))
   } else {
-    const visible = state.items.filter((item) => matchesFilter(item, state.filter))
-    if (visible.length === 0) {
-      article.append(element('p', 'backlog-empty', emptyText(state.filter)))
-    }
-    for (const project of groupItems(visible)) article.append(projectBlock(project, state, handlers))
-  }
-
-  body.append(article)
-  host.replaceChildren(bar, header, body)
-}
-
-function emptyText(filter: BacklogFilter): string {
-  if (filter === 'pending') return 'No hay nada pendiente en ningún proyecto.'
-  if (filter === 'finding') return 'No hay hallazgos abiertos.'
-  return 'Todavía no se ha resuelto nada.'
-}
-
-function projectBlock(project: ProjectGroup, state: BacklogState, handlers: BacklogHandlers): HTMLElement {
-  const block = element('section', 'backlog-project')
-  const head = element('h2', 'backlog-project-head')
-  const dot = element('span', 'dot')
-  dot.style.background = projectColor(project.projectId)
-  head.append(dot, element('span', 'backlog-project-name', project.name))
-  head.append(element('span', 'backlog-project-count', String(project.count)))
-  block.append(head)
-
-  for (const page of project.pages) {
-    const group = element('div', 'backlog-page')
-    if (page.pageId !== null) {
-      const link = document.createElement('button')
-      link.type = 'button'
-      link.className = 'backlog-page-link'
-      link.textContent = page.title
-      const pageId = page.pageId
-      link.addEventListener('click', () => {
-        handlers.onOpenPage(pageId)
-      })
-      group.append(link)
-    } else {
-      group.append(element('span', 'backlog-page-link backlog-page-link--none', page.title))
-    }
-    for (const item of page.items) group.append(itemRow(item, state, handlers))
-    block.append(group)
-  }
-  return block
-}
-
-function itemRow(item: BacklogItem, state: BacklogState, handlers: BacklogHandlers): HTMLElement {
-  const resolved = item.status === 'resolved'
-  const row = element('div', resolved ? 'backlog-item backlog-item--done' : 'backlog-item')
-
-  const check = document.createElement('button')
-  check.type = 'button'
-  check.className = 'backlog-check'
-  check.disabled = state.busy.has(item.id)
-  check.setAttribute('role', 'checkbox')
-  check.setAttribute('aria-checked', String(resolved))
-  check.setAttribute('aria-label', resolved ? `Reabrir: ${item.title}` : `Marcar resuelto: ${item.title}`)
-  if (resolved) check.append(icon('check', 11))
-  check.addEventListener('click', () => {
-    handlers.onStatus(item.id, resolved ? 'open' : 'resolved')
-  })
-
-  const text = element('div', 'backlog-text')
-  const title = document.createElement('button')
-  title.type = 'button'
-  title.className = 'backlog-title'
-  title.setAttribute('aria-expanded', String(state.expanded.has(item.id)))
-  title.disabled = item.body.trim().length === 0 && item.resolution.trim().length === 0
-  title.append(element('span', `backlog-kind backlog-kind--${item.kind}`, item.kind === 'pending' ? 'pendiente' : 'hallazgo'))
-  title.append(element('span', 'backlog-title-text', item.title))
-  title.addEventListener('click', () => {
-    handlers.onToggleItem(item.id)
-  })
-  text.append(title)
-
-  if (state.expanded.has(item.id)) {
-    if (item.body.trim().length > 0) text.append(element('p', 'backlog-body', item.body))
-    if (resolved && item.resolution.trim().length > 0) {
-      text.append(element('p', 'backlog-resolution', item.resolution))
+    const visible = visibleItems(state)
+    const current = selectedItem(state)
+    if (visible.length === 0) body.append(element('p', 'inbox-empty', emptyText(state)))
+    let group = '\u0000'
+    for (const item of visible) {
+      if (state.project === ALL_PROJECTS && projectOf(item) !== group) {
+        group = projectOf(item)
+        body.append(groupHead(item, visible.filter((other) => projectOf(other) === group).length))
+      }
+      body.append(itemRow(item, item.id === current?.id, state, handlers))
     }
   }
+  pane.append(body)
+  return pane
+}
 
-  row.append(check, text)
+function tabList(state: BacklogState, handlers: BacklogHandlers): HTMLElement {
+  const tabs = element('div', 'inbox-tabs')
+  tabs.setAttribute('role', 'tablist')
+  tabs.setAttribute('aria-label', 'Qué ver')
+  for (const tab of TABS) {
+    const count = (state.items ?? [])
+      .filter((item) => tabOf(item) === tab.key)
+      .filter((item) => state.project === ALL_PROJECTS || projectOf(item) === state.project).length
+    const on = tab.key === state.tab
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = on ? 'inbox-tab inbox-tab--on' : 'inbox-tab'
+    button.setAttribute('role', 'tab')
+    button.setAttribute('aria-selected', String(on))
+    button.append(element('span', '', tab.label), element('span', 'inbox-count', String(count)))
+    button.addEventListener('click', () => {
+      handlers.onTab(tab.key)
+    })
+    tabs.append(button)
+  }
+  return tabs
+}
+
+function chipRow(state: BacklogState, handlers: BacklogHandlers): HTMLElement {
+  const row = element('div', 'inbox-chips')
+  row.setAttribute('role', 'group')
+  row.setAttribute('aria-label', 'Proyecto')
+  for (const chip of projectChips(state)) {
+    const on = chip.value === state.project
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = on ? 'inbox-chip inbox-chip--on' : 'inbox-chip'
+    button.setAttribute('aria-pressed', String(on))
+    if (chip.value !== ALL_PROJECTS) {
+      const dot = element('span', 'dot')
+      dot.style.background = projectColor(chip.projectId)
+      button.append(dot)
+    }
+    button.append(element('span', '', chip.label), element('span', 'inbox-count', String(chip.count)))
+    button.addEventListener('click', () => {
+      handlers.onProject(chip.value)
+    })
+    row.append(button)
+  }
   return row
+}
+
+function groupHead(item: BacklogItem, count: number): HTMLElement {
+  const head = element('div', 'inbox-group')
+  const dot = element('span', 'dot')
+  dot.style.background = projectColor(item.projectId)
+  head.append(dot, element('span', 'inbox-group-name', item.projectName ?? 'Sin proyecto'))
+  head.append(element('span', 'inbox-count', String(count)))
+  return head
+}
+
+function kindGlyph(item: BacklogItem): HTMLElement {
+  const glyph = element('span', `inbox-glyph inbox-glyph--${item.status === 'resolved' ? 'done' : item.kind}`)
+  glyph.setAttribute('aria-hidden', 'true')
+  if (item.status === 'resolved') glyph.append(icon('check', 11))
+  return glyph
+}
+
+function itemRow(item: BacklogItem, on: boolean, state: BacklogState, handlers: BacklogHandlers): HTMLElement {
+  const row = document.createElement('button')
+  row.type = 'button'
+  row.className = on ? 'inbox-row inbox-row--on' : 'inbox-row'
+  row.setAttribute('aria-current', String(on))
+
+  const text = element('span', 'inbox-row-text')
+  text.append(element('span', 'inbox-row-title', item.title))
+  const meta = element('span', 'inbox-row-meta')
+  meta.append(element('span', 'inbox-key', itemKey(item)))
+  meta.append(element('span', 'inbox-sep', '·'))
+  meta.append(element('span', 'inbox-row-page', item.pageTitle ?? 'Sin página'))
+  text.append(meta)
+
+  const days = daysSince(item.status === 'resolved' ? item.resolvedAt ?? item.updatedAt : item.createdAt, state.now)
+  const age = element('span', 'inbox-age', shortAge(days))
+  if (item.status === 'open' && days >= OLD_DAYS) age.classList.add('inbox-age--old')
+
+  row.append(kindGlyph(item), text, age)
+  row.addEventListener('click', () => {
+    handlers.onSelect(item.id)
+  })
+  return row
+}
+
+function emptyText(state: BacklogState): string {
+  if (state.query.trim().length > 0) return `Nada coincide con «${state.query.trim()}».`
+  if (state.tab === 'pending') return 'No hay nada pendiente aquí.'
+  if (state.tab === 'finding') return 'No hay hallazgos abiertos aquí.'
+  return 'Todavía no se ha resuelto nada aquí.'
+}
+
+function problemBlock(failure: Problem): HTMLElement {
+  const problem = element('div', 'problem')
+  problem.append(element('p', 'problem-message', failure.message))
+  if (failure.hint) problem.append(element('p', 'problem-hint', failure.hint))
+  return problem
+}
+
+function detailPane(state: BacklogState, handlers: BacklogHandlers): HTMLElement {
+  const pane = element('article', 'inbox-detail')
+  pane.setAttribute('aria-label', 'Detalle')
+  const bar = element('div', 'inbox-detail-bar')
+  bar.setAttribute('data-tauri-drag-region', '')
+  pane.append(bar)
+
+  const item = state.items === null ? undefined : selectedItem(state)
+  if (item === undefined) {
+    const body = element('div', 'inbox-detail-body')
+    body.append(element('p', 'inbox-empty', state.items === null ? '' : 'Elige un ítem de la lista.'))
+    pane.append(body)
+    return pane
+  }
+
+  const crumb = element('nav', 'inbox-crumb')
+  crumb.append(element('span', '', item.projectName ?? 'Sin proyecto'))
+  if (item.pageId !== null) {
+    crumb.append(element('span', 'inbox-crumb-sep', '/'))
+    const link = document.createElement('button')
+    link.type = 'button'
+    link.className = 'inbox-crumb-link'
+    link.textContent = item.pageTitle ?? 'Página'
+    const pageId = item.pageId
+    link.addEventListener('click', () => {
+      handlers.onOpenPage(pageId)
+    })
+    crumb.append(link)
+  }
+  bar.append(crumb)
+
+  const body = element('div', 'inbox-detail-body')
+  const key = itemKey(item)
+  const head = element('div', 'inbox-detail-head')
+  const copyKey = document.createElement('button')
+  copyKey.type = 'button'
+  copyKey.className = 'inbox-id'
+  copyKey.setAttribute('aria-label', `Copiar el ID ${key}`)
+  copyKey.append(element('span', '', state.copied === key ? 'Copiado' : key), icon('doc', 11))
+  copyKey.addEventListener('click', () => {
+    handlers.onCopy(key)
+  })
+  head.append(copyKey)
+
+  const resolved = item.status === 'resolved'
+  const kind = element(
+    'span',
+    `inbox-kind inbox-kind--${resolved ? 'done' : item.kind}`,
+    resolved ? 'resuelto' : item.kind === 'pending' ? 'pendiente' : 'hallazgo',
+  )
+  head.append(kind)
+  const origin = item.source === 'extracted' ? 'Extraído de una página' : 'Anotado a mano'
+  const when = resolved
+    ? `resuelto ${longAge(daysSince(item.resolvedAt ?? item.updatedAt, state.now))}`
+    : longAge(daysSince(item.createdAt, state.now))
+  head.append(element('span', 'inbox-origin', `${origin} · ${when}`))
+  body.append(head)
+
+  body.append(element('h1', 'inbox-title', item.title))
+  if (item.body.trim().length > 0) body.append(element('p', 'inbox-body', item.body))
+
+  if (!resolved) {
+    const command = `cierra ${key}`
+    const hint = element('div', 'inbox-hint')
+    hint.append(icon('next', 12))
+    const words = element('span', 'inbox-hint-text', 'Para cerrarlo desde Claude: ')
+    words.append(element('code', '', command))
+    hint.append(words)
+    const copyCommand = document.createElement('button')
+    copyCommand.type = 'button'
+    copyCommand.className = 'inbox-hint-copy'
+    copyCommand.textContent = state.copied === command ? 'Copiado' : 'Copiar'
+    copyCommand.addEventListener('click', () => {
+      handlers.onCopy(command)
+    })
+    hint.append(copyCommand)
+    body.append(hint)
+  }
+
+  body.append(element('div', 'inbox-rule'))
+  const busy = state.busy.has(item.id)
+
+  if (resolved) {
+    body.append(element('div', 'inbox-label', 'Cómo se resolvió'))
+    body.append(
+      element(
+        'p',
+        item.resolution.trim().length > 0 ? 'inbox-resolution' : 'inbox-resolution inbox-resolution--none',
+        item.resolution.trim().length > 0 ? item.resolution : 'Se cerró sin nota.',
+      ),
+    )
+  } else {
+    const label = element('label', 'inbox-label', 'Cómo se resolvió')
+    label.setAttribute('for', 'inbox-resolution')
+    const area = document.createElement('textarea')
+    area.id = 'inbox-resolution'
+    area.className = 'inbox-draft'
+    area.rows = 3
+    area.placeholder = 'Una línea sobre lo que se hizo. Queda en el historial del ítem.'
+    area.value = state.draft
+    area.addEventListener('input', () => {
+      handlers.onDraft(area.value)
+    })
+    body.append(label, area)
+  }
+
+  const actions = element('div', 'inbox-actions')
+  if (resolved) {
+    actions.append(actionButton('Reabrir', 'prev', 'inbox-action', busy, () => handlers.onReopen(item.id)))
+  } else {
+    actions.append(
+      actionButton('Marcar resuelto', 'check', 'inbox-action inbox-action--primary', busy, () => handlers.onResolve(item.id)),
+    )
+    if (item.kind === 'finding') {
+      actions.append(
+        actionButton('Convertir en pendiente', 'next', 'inbox-action', busy, () => handlers.onToPending(item.id)),
+      )
+    }
+  }
+  if (item.pageId !== null) {
+    const pageId = item.pageId
+    actions.append(actionButton('Abrir la página', 'external', 'inbox-action', false, () => handlers.onOpenPage(pageId)))
+  }
+  body.append(actions)
+
+  if (state.failure && state.items !== null) body.append(problemBlock(state.failure))
+  pane.append(body)
+  return pane
+}
+
+function actionButton(
+  label: string,
+  glyph: Parameters<typeof icon>[0],
+  className: string,
+  disabled: boolean,
+  run: () => void,
+): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = className
+  button.disabled = disabled
+  button.append(icon(glyph, 12), element('span', '', label))
+  button.addEventListener('click', run)
+  return button
 }
