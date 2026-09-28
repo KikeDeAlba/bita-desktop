@@ -1,5 +1,6 @@
 import {
   backlogList,
+  backlogSetKind,
   backlogSetStatus,
   type BacklogItem,
   type BacklogStatus,
@@ -26,7 +27,17 @@ import { renderRail, pageKey, spaceKey, type RailState, type Selection } from '.
 import { renderReader, type ReaderState } from './notes/reader.ts'
 import { attachSash } from './notes/sash.ts'
 import { initProse, stepProse } from './notes/prose.ts'
-import { openCount, renderBacklog, type BacklogFilter, type BacklogState } from './notes/backlog.ts'
+import {
+  ALL_PROJECTS,
+  findByKey,
+  openCount,
+  projectOf,
+  renderBacklog,
+  visibleItems,
+  tabOf,
+  type BacklogState,
+  type BacklogTab,
+} from './notes/backlog.ts'
 
 const railHost = must<HTMLElement>('#rail')
 const readerHost = must<HTMLElement>('#reader')
@@ -57,10 +68,15 @@ let asideOpen = remembered(ASIDE_KEY)
 let logOpen = true
 let scale = rememberedScale()
 let backlog: BacklogItem[] | null = null
-let backlogFilter: BacklogFilter = 'pending'
+let backlogTab: BacklogTab = 'finding'
+let backlogProject = ALL_PROJECTS
+let backlogQuery = ''
+let backlogSelected: number | null = null
+let backlogDraft = ''
+let backlogCopied: string | null = null
 let backlogFailure: Problem | null = null
 const backlogBusy = new Set<number>()
-const backlogExpanded = new Set<number>()
+let copiedTimer = 0
 
 let railPainted = ''
 let readerPainted = ''
@@ -121,22 +137,32 @@ function railState(): RailState {
 function backlogState(): BacklogState {
   return {
     items: backlog,
-    filter: backlogFilter,
+    tab: backlogTab,
+    project: backlogProject,
+    query: backlogQuery,
+    selectedId: backlogSelected,
+    draft: backlogDraft,
+    copied: backlogCopied,
     failure: backlogFailure,
     busy: backlogBusy,
-    expanded: backlogExpanded,
     railOpen,
+    now: new Date(),
   }
 }
 
 function backlogSignature(): string {
   return [
     'backlog',
-    backlogFilter,
-    backlog === null ? 'pending' : backlog.map((item) => `${item.id}:${item.status}:${item.updatedAt}`).join(','),
+    backlogTab,
+    backlogProject,
+    backlogQuery,
+    backlogSelected ?? '',
+    backlogCopied ?? '',
+    backlog === null
+      ? 'pending'
+      : backlog.map((item) => `${item.id}:${item.kind}:${item.status}:${item.updatedAt}:${item.key ?? ''}`).join(','),
     backlogFailure?.message ?? '',
     [...backlogBusy].join('.'),
-    [...backlogExpanded].join('.'),
     railOpen,
   ].join('~')
 }
@@ -207,6 +233,7 @@ function asideSignature(): string {
 }
 
 function paint(): void {
+  must<HTMLElement>('#notas').classList.toggle('notas--backlog', selected?.kind === 'backlog')
   const rail = railSignature()
   if (rail !== railPainted) {
     railPainted = rail
@@ -225,17 +252,28 @@ function paint(): void {
     if (view !== readerPainted) {
       readerPainted = view
       renderBacklog(readerHost, backlogState(), {
-        onFilter: (filter) => {
-          backlogFilter = filter
-          paint()
+        onTab: (tab) => {
+          backlogTab = tab
+          chooseBacklogItem(null)
         },
-        onStatus: setBacklogStatus,
-        onToggleItem: (id) => {
-          if (backlogExpanded.has(id)) backlogExpanded.delete(id)
-          else backlogExpanded.add(id)
-          paint()
+        onProject: (project) => {
+          backlogProject = project
+          chooseBacklogItem(null)
         },
+        onQuery: queryBacklog,
+        onSelect: chooseBacklogItem,
+        onDraft: (text) => {
+          backlogDraft = text
+        },
+        onResolve: (id) => {
+          setBacklogStatus(id, 'resolved', backlogDraft)
+        },
+        onReopen: (id) => {
+          setBacklogStatus(id, 'open', null)
+        },
+        onToPending: setBacklogPending,
         onOpenPage: selectPage,
+        onCopy: copyBacklogText,
         onExpandRail: () => setRail(true),
       })
     }
@@ -273,6 +311,7 @@ function paint(): void {
       onChild: selectPage,
       onEntry: openEntryDocument,
       onBacklog: selectBacklog,
+      onBacklogItem: openBacklogItem,
       onCollapse: () => setAside(false),
       onExpand: () => setAside(true),
     })
@@ -406,20 +445,83 @@ async function loadBacklog(): Promise<void> {
   paint()
 }
 
-function setBacklogStatus(id: number, status: BacklogStatus): void {
+function openBacklogItem(id: number): void {
+  const item = (backlog ?? []).find((candidate) => candidate.id === id)
+  if (item) {
+    backlogTab = tabOf(item)
+    backlogProject = projectOf(item)
+    backlogQuery = ''
+  }
+  backlogSelected = id
+  backlogDraft = ''
+  selectBacklog()
+}
+
+function chooseBacklogItem(id: number | null): void {
+  if (id !== backlogSelected) backlogDraft = ''
+  backlogSelected = id
+  paint()
+}
+
+function queryBacklog(value: string): void {
+  backlogQuery = value
+  const exact = findByKey(backlog, value)
+  if (exact) {
+    backlogTab = tabOf(exact)
+    backlogProject = ALL_PROJECTS
+    chooseBacklogItem(exact.id)
+    return
+  }
+  paint()
+}
+
+function copyBacklogText(text: string): void {
+  void copyText(text)
+    .then(() => {
+      backlogCopied = text
+      window.clearTimeout(copiedTimer)
+      copiedTimer = window.setTimeout(() => {
+        backlogCopied = null
+        paint()
+      }, 1500)
+      paint()
+    })
+    .catch((error: unknown) => {
+      backlogFailure = describeProblem(error)
+      paint()
+    })
+}
+
+function afterBacklogChange(id: number, run: () => Promise<{ data: BacklogItem }>): void {
+  const before = visibleItems(backlogState())
+  const at = before.findIndex((item) => item.id === id)
   backlogBusy.add(id)
   paint()
   void (async () => {
     try {
-      const payload = await backlogSetStatus(id, status)
+      const payload = await run()
       backlog = (backlog ?? []).map((item) => (item.id === id ? { ...item, ...payload.data } : item))
       backlogFailure = null
+      backlogDraft = ''
     } catch (error) {
       backlogFailure = describeProblem(error)
     }
     backlogBusy.delete(id)
+    const after = visibleItems(backlogState())
+    if (!after.some((item) => item.id === id)) {
+      const successor = before.slice(at + 1).find((item) => after.some((other) => other.id === item.id))
+      backlogSelected = successor?.id ?? after.at(-1)?.id ?? null
+    }
     paint()
   })()
+}
+
+function setBacklogStatus(id: number, status: BacklogStatus, resolution: string | null): void {
+  afterBacklogChange(id, () => backlogSetStatus(id, status, resolution))
+}
+
+function setBacklogPending(id: number): void {
+  afterBacklogChange(id, () => backlogSetKind(id, 'pending'))
 }
 
 function selectPage(pageId: number): void {

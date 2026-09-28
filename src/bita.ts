@@ -396,6 +396,7 @@ export type BacklogStatus = 'open' | 'resolved'
 
 export interface PageBacklogItem {
   id: number
+  key?: string
   kind: BacklogKind
   status: BacklogStatus
   title: string
@@ -407,6 +408,7 @@ export interface PageBacklogItem {
 
 export interface BacklogItem extends PageBacklogItem {
   projectId: number | null
+  projectKey?: string | null
   projectName: string | null
   pageId: number | null
   pageTitle: string | null
@@ -515,8 +517,16 @@ export function backlogList(): Promise<CliPayload<BacklogItem[], BacklogMeta>> {
   return invoke('backlog_list')
 }
 
-export function backlogSetStatus(id: number, status: BacklogStatus): Promise<CliPayload<BacklogItem, unknown>> {
-  return invoke('backlog_set_status', { id, status })
+export function backlogSetStatus(
+  id: number,
+  status: BacklogStatus,
+  resolution: string | null = null,
+): Promise<CliPayload<BacklogItem, unknown>> {
+  return invoke('backlog_set_status', { id, status, resolution })
+}
+
+export function backlogSetKind(id: number, kind: BacklogKind): Promise<CliPayload<BacklogItem, unknown>> {
+  return invoke('backlog_set_kind', { id, kind })
 }
 
 export function pageAsset(relPath: string): Promise<string | null> {

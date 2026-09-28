@@ -194,11 +194,17 @@ defecto. El control de la barra del lector, o `cmd ]` y `cmd [`, la lleva de
 560 px a todo el ancho; el doble clic la devuelve a 960. El árbol y el panel
 lateral se redimensionan arrastrando su borde. Los tres anchos se recuerdan.
 
-**Pendientes y hallazgos** es una vista propia, fija sobre el árbol: la lista
-del backlog de bita de todos los proyectos, agrupada por proyecto y página, con
-un clic para resolver o reabrir (`bita backlog resolve|reopen`). El panel
-lateral de cada página enseña los suyos abiertos y los enlaces que se
-registraron para ella. Necesita el CLI 0.7 o posterior.
+**Pendientes y hallazgos** es una vista propia, fija sobre el árbol: una
+bandeja con el backlog de bita. A la izquierda, la lista con las pestañas
+Hallazgos, Pendientes y Resueltos, un chip por proyecto para filtrar y un campo
+que filtra por título o salta a un ítem por su clave (`STI-14`). A la derecha,
+el detalle: la clave, que se copia con un clic, la línea `cierra STI-14` para
+pedírselo a Claude, una nota de cómo se resolvió y los botones para resolver,
+reabrir, convertir un hallazgo en pendiente o abrir su página
+(`bita backlog resolve|reopen|edit`). El panel lateral de cada página enseña sus
+ítems abiertos por clave, y los enlaces que se registraron para ella. Las claves
+necesitan el CLI 0.9 o posterior; con uno anterior, los ítems se nombran por su
+id.
 
 Se abre junto con la app, y `BITA_NO_OPEN_NOTES` lo suprime. Aun así se construye
 desde Rust en vez de declararla en `tauri.conf.json`: una ventana declarada se

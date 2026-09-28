@@ -7,6 +7,7 @@ export interface AsideHandlers {
   onChild: (pageId: number) => void
   onEntry: (entryId: number) => void
   onBacklog: () => void
+  onBacklogItem: (id: number) => void
   onCollapse: () => void
   onExpand: () => void
 }
@@ -187,9 +188,15 @@ function backlogBlock(items: PageBacklogItem[], handlers: AsideHandlers): HTMLEl
   block.append(head)
 
   for (const item of items) {
-    const row = element('div', 'aside-backlog-row')
-    row.append(element('span', `backlog-kind backlog-kind--${item.kind}`, item.kind === 'pending' ? 'P' : 'H'))
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = 'aside-backlog-row'
+    row.title = item.kind === 'pending' ? 'Pendiente' : 'Hallazgo'
+    row.append(element('span', `aside-backlog-key aside-backlog-key--${item.kind}`, item.key ?? `#${item.id}`))
     row.append(element('span', 'aside-backlog-text', item.title))
+    row.addEventListener('click', () => {
+      handlers.onBacklogItem(item.id)
+    })
     block.append(row)
   }
   return block
