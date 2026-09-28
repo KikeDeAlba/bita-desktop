@@ -170,16 +170,25 @@ fn the_vendored_cli_lists_the_backlog_the_app_paints() {
     ]);
     assert_eq!(added["ok"].as_bool(), Some(true), "{added}");
     let id = added["data"]["id"].as_i64().expect("the new item has an id").to_string();
+    assert_eq!(added["data"]["key"].as_str(), Some("CON-1"), "{added}");
 
-    let resolved = run(&["backlog", "resolve", &id]);
+    let resolved = run(&["backlog", "resolve", "CON-1", "--resolution", "Rotado"]);
     assert_eq!(resolved["data"]["status"].as_str(), Some("resolved"));
+    assert_eq!(resolved["data"]["id"].as_i64().map(|value| value.to_string()), Some(id.clone()));
+
+    let reopened = run(&["backlog", "reopen", &id]);
+    assert_eq!(reopened["data"]["status"].as_str(), Some("open"));
+    let edited = run(&["backlog", "edit", &id, "--kind", "finding"]);
+    assert_eq!(edited["data"]["kind"].as_str(), Some("finding"));
+    let resolved = run(&["backlog", "resolve", &id]);
+    assert_eq!(resolved["data"]["resolution"].as_str(), Some("Rotado"));
 
     let listed = run(&["backlog", "ls", "--status", "all"]);
     assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
     let item = &listed["data"][0];
     for field in [
-        "id", "kind", "status", "title", "body", "projectName", "pageId", "pageTitle", "updatedAt",
-        "resolution",
+        "id", "key", "projectKey", "kind", "status", "title", "body", "projectName", "pageId",
+        "pageTitle", "updatedAt", "resolution", "source", "createdAt",
     ] {
         assert!(item.get(field).is_some(), "backlog items lost {field}: {item}");
     }

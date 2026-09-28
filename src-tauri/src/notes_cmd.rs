@@ -117,12 +117,43 @@ pub async fn backlog_set_status(
     app: AppHandle,
     id: i64,
     status: String,
+    resolution: Option<String>,
 ) -> Result<CliPayload, Problem> {
     let action = backlog_action(&status)?;
     let id = id.to_string();
-    payload(&app, &["backlog", action, &id])
+    let args = status_args(action, &id, resolution.as_deref());
+    payload(&app, &args).await.map_err(stale_backlog)
+}
+
+fn status_args<'a>(action: &'a str, id: &'a str, resolution: Option<&'a str>) -> Vec<&'a str> {
+    let mut args = vec!["backlog", action, id];
+    if let Some(text) = resolution.map(str::trim).filter(|text| !text.is_empty()) {
+        if action == "resolve" {
+            args.push("--resolution");
+            args.push(text);
+        }
+    }
+    args
+}
+
+#[tauri::command]
+pub async fn backlog_set_kind(app: AppHandle, id: i64, kind: String) -> Result<CliPayload, Problem> {
+    let kind = backlog_kind(&kind)?;
+    let id = id.to_string();
+    payload(&app, &["backlog", "edit", &id, "--kind", kind])
         .await
         .map_err(stale_backlog)
+}
+
+fn backlog_kind(kind: &str) -> Result<&'static str, Problem> {
+    match kind {
+        "pending" => Ok("pending"),
+        "finding" => Ok("finding"),
+        other => Err(Problem::new(
+            ProblemKind::CliFailed,
+            format!("No conozco el tipo «{other}»."),
+        )),
+    }
 }
 
 fn backlog_action(status: &str) -> Result<&'static str, Problem> {
@@ -395,6 +426,23 @@ mod tests {
         assert_eq!(super::backlog_action("resolved").ok(), Some("resolve"));
         assert_eq!(super::backlog_action("open").ok(), Some("reopen"));
         assert!(super::backlog_action("rm").is_err());
+    }
+
+    #[test]
+    fn a_resolution_travels_only_when_resolving_and_not_blank() {
+        assert_eq!(
+            super::status_args("resolve", "7", Some(" rotado ")),
+            vec!["backlog", "resolve", "7", "--resolution", "rotado"]
+        );
+        assert_eq!(super::status_args("resolve", "7", Some("  ")), vec!["backlog", "resolve", "7"]);
+        assert_eq!(super::status_args("reopen", "7", Some("x")), vec!["backlog", "reopen", "7"]);
+    }
+
+    #[test]
+    fn only_pending_and_finding_are_kinds() {
+        assert_eq!(super::backlog_kind("pending").ok(), Some("pending"));
+        assert_eq!(super::backlog_kind("finding").ok(), Some("finding"));
+        assert!(super::backlog_kind("bug").is_err());
     }
 
     #[test]
