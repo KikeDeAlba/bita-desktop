@@ -213,14 +213,18 @@ pub fn resolve_entry(app: &AppHandle) -> Option<(PathBuf, Source)> {
     if let Some(explicit) = env::var_os(CLI_OVERRIDE_ENV) {
         let path = PathBuf::from(explicit);
         if path.is_file() {
-            return Some((canonical(path), Source::Installed));
+            if let Some(entry) = script_entry(&path) {
+                return Some((entry, Source::Installed));
+            }
         }
     }
 
     for directory in bin_directories() {
         let candidate = directory.join("bita");
         if candidate.exists() {
-            return Some((canonical(candidate), Source::Installed));
+            if let Some(entry) = script_entry(&candidate) {
+                return Some((entry, Source::Installed));
+            }
         }
     }
 
@@ -252,6 +256,36 @@ fn bin_directories() -> Vec<PathBuf> {
 
 fn canonical(path: PathBuf) -> PathBuf {
     fs::canonicalize(&path).unwrap_or(path)
+}
+
+fn script_entry(candidate: &Path) -> Option<PathBuf> {
+    let resolved = canonical(candidate.to_path_buf());
+    let text = fs::read_to_string(&resolved).ok()?;
+    let first_line = text.lines().next().unwrap_or_default();
+    if !first_line.starts_with("#!") || first_line.contains("node") {
+        return Some(resolved);
+    }
+    let directory = resolved.parent()?;
+    shim_targets(&text)
+        .into_iter()
+        .map(|relative| canonical(directory.join(relative)))
+        .find(|target| target.is_file())
+}
+
+fn shim_targets(text: &str) -> Vec<&str> {
+    const MARKER: &str = "\"$basedir/";
+    let mut targets = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(MARKER) {
+        let after = &rest[start + MARKER.len()..];
+        let Some(end) = after.find('"') else { break };
+        let target = &after[..end];
+        if [".js", ".mjs", ".cjs", ".ts"].iter().any(|extension| target.ends_with(extension)) {
+            targets.push(target);
+        }
+        rest = &after[end..];
+    }
+    targets
 }
 
 pub fn version_of(node: &Path, entry: &Path) -> Option<String> {
@@ -298,4 +332,70 @@ pub fn database_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp"));
 
     data_home.join("bita").join("bita.db")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{script_entry, shim_targets};
+    use std::fs;
+    use std::path::PathBuf;
+
+    const PNPM_SHIM: &str = r#"#!/bin/sh
+basedir=$(dirname "$(echo "$0" | sed -e 's,\\,/,g')")
+if [ -x "$basedir/node" ]; then
+  exec "$basedir/node"  "$basedir/../global/v11/abc/node_modules/@kikedealba/bita/dist/bin/bita.js" "$@"
+else
+  exec node  "$basedir/../global/v11/abc/node_modules/@kikedealba/bita/dist/bin/bita.js" "$@"
+fi
+"#;
+
+    fn scratch(name: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!("bita-desktop-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).expect("scratch");
+        directory
+    }
+
+    #[test]
+    fn finds_the_javascript_behind_a_pnpm_shim() {
+        assert_eq!(
+            shim_targets(PNPM_SHIM),
+            vec![
+                "../global/v11/abc/node_modules/@kikedealba/bita/dist/bin/bita.js",
+                "../global/v11/abc/node_modules/@kikedealba/bita/dist/bin/bita.js",
+            ]
+        );
+
+        let root = scratch("shim");
+        let bin = root.join("bin");
+        let entry = root.join("global/v11/abc/node_modules/@kikedealba/bita/dist/bin/bita.js");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::create_dir_all(entry.parent().expect("parent")).expect("entry dir");
+        fs::write(&entry, "#!/usr/bin/env node\n").expect("entry");
+        fs::write(bin.join("bita"), PNPM_SHIM).expect("shim");
+
+        let resolved = script_entry(&bin.join("bita")).expect("resolved");
+        assert_eq!(resolved, fs::canonicalize(&entry).expect("canonical"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn keeps_a_node_script_or_a_symlink_to_one() {
+        let root = scratch("node");
+        let entry = root.join("bita.js");
+        fs::write(&entry, "#!/usr/bin/env node\nconsole.log(1)\n").expect("entry");
+        let link = root.join("bita");
+        std::os::unix::fs::symlink(&entry, &link).expect("symlink");
+        assert_eq!(script_entry(&link), Some(fs::canonicalize(&entry).expect("canonical")));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_shell_script_without_a_javascript_target_is_skipped() {
+        let root = scratch("other");
+        let script = root.join("bita");
+        fs::write(&script, "#!/bin/sh\necho hi\n").expect("script");
+        assert_eq!(script_entry(&script), None);
+        let _ = fs::remove_dir_all(&root);
+    }
 }
