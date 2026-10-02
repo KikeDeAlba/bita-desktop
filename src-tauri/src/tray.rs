@@ -151,6 +151,7 @@ mod tests {
             start_local: started_at.into(),
             elapsed_seconds: elapsed,
             draft,
+            kind: None,
         }
     }
 

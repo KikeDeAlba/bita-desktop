@@ -46,6 +46,8 @@ pub struct Entry {
     pub duration_human: String,
     pub registered: bool,
     pub running: bool,
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 impl Entry {
@@ -69,6 +71,7 @@ pub struct LiveTimer {
     pub start_local: String,
     pub elapsed_seconds: i64,
     pub draft: bool,
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Default)]
@@ -233,6 +236,16 @@ mod tests {
         let error = envelope.error.expect("error");
         assert_eq!(error.code, "USAGE_ERROR");
         assert!(error.hint.is_none());
+    }
+
+    #[test]
+    fn an_entry_without_kind_parses_and_one_with_kind_keeps_it() {
+        let envelope: Envelope<Vec<Entry>> = serde_json::from_str(RUNNING).expect("parse");
+        assert!(envelope.data.expect("data")[0].kind.is_none());
+
+        let with_kind = RUNNING.replace(r#""running":true}"#, r#""running":true,"kind":"remote-meeting"}"#);
+        let envelope: Envelope<Vec<Entry>> = serde_json::from_str(&with_kind).expect("parse");
+        assert_eq!(envelope.data.expect("data")[0].kind.as_deref(), Some("remote-meeting"));
     }
 
     #[test]

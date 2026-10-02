@@ -4,6 +4,8 @@ import {
   describeProblem,
   discardTimer,
   doctorReport,
+  isMeetingKind,
+  MEETING_KINDS,
   notesToday,
   onDocsChanged,
   onSnapshot,
@@ -43,6 +45,7 @@ const launcher = must<HTMLElement>('#launcher')
 const launchForm = must<HTMLFormElement>('#launch-form')
 const launchTitle = must<HTMLInputElement>('#launch-title')
 const launchBlank = must<HTMLButtonElement>('#launch-blank')
+const launchKind = must<HTMLElement>('#launch-kind')
 const tabStrip = must<HTMLElement>('.tabs')
 const gear = must<HTMLButtonElement>('#open-settings')
 const notesButton = must<HTMLButtonElement>('#open-notes')
@@ -55,6 +58,8 @@ let workedRange: 'today' | 'week' = 'today'
 let editing: number | null = null
 let draftTitle = ''
 let draftProject = ''
+let draftKind = ''
+let launchKindValue = ''
 let confirmingDiscard = false
 let failure: Problem | null = null
 let painted = ''
@@ -71,7 +76,7 @@ function signature(): string {
   const timers = latest.running
     .map(
       (timer) =>
-        `${timer.id}:${timer.draft}:${timer.title}:${timer.projectName}:${timer.sectionsWritten}/${timer.sectionsTotal}:${timer.touchedSinceNote}`,
+        `${timer.id}:${timer.draft}:${timer.title}:${timer.projectName}:${timer.kind}:${timer.sectionsWritten}/${timer.sectionsTotal}:${timer.touchedSinceNote}`,
     )
     .join('|')
   const notes = notesOfToday
@@ -137,6 +142,7 @@ function timerCard(timer: LiveTimer): HTMLElement {
     title.textContent = timer.title ?? ''
   }
   card.append(title)
+  if (isMeetingKind(timer.kind)) card.append(meetingBadge(timer.kind))
 
   const row = element('div', 'timer-row')
   row.append(projectPill(timer))
@@ -159,6 +165,7 @@ function timerCard(timer: LiveTimer): HTMLElement {
       editing = timer.id
       draftTitle = timer.title ?? ''
       draftProject = timer.projectId === null ? '' : String(timer.projectId)
+      draftKind = timer.kind ?? ''
       confirmingDiscard = false
       painted = ''
       paint()
@@ -167,6 +174,19 @@ function timerCard(timer: LiveTimer): HTMLElement {
   }
 
   return card
+}
+
+function meetingBadge(kind: keyof typeof MEETING_KINDS): HTMLElement {
+  const badge = element('p', 'timer-kind')
+  badge.append(element('i', 'rec-dot'), element('span', undefined, MEETING_KINDS[kind]))
+  return badge
+}
+
+function setLaunchKind(value: string): void {
+  launchKindValue = value
+  for (const button of launchKind.querySelectorAll<HTMLButtonElement>('[data-kind]')) {
+    button.setAttribute('aria-checked', String(button.dataset['kind'] === value))
+  }
 }
 
 function editForm(timer: LiveTimer): HTMLElement {
@@ -206,6 +226,28 @@ function editForm(timer: LiveTimer): HTMLElement {
   projectField.append(select)
   form.append(projectField)
 
+  const kindField = element('label', 'field')
+  kindField.append(element('span', 'field-label', 'Tipo'))
+  const kindSelect = document.createElement('select')
+  for (const [value, label] of [['', 'Trabajo'], ...Object.entries(MEETING_KINDS)]) {
+    const option = document.createElement('option')
+    option.value = value ?? ''
+    option.textContent = label ?? ''
+    kindSelect.append(option)
+  }
+  if (draftKind !== '' && !isMeetingKind(draftKind)) {
+    const option = document.createElement('option')
+    option.value = draftKind
+    option.textContent = draftKind
+    kindSelect.append(option)
+  }
+  kindSelect.value = draftKind
+  kindSelect.addEventListener('change', () => {
+    draftKind = kindSelect.value
+  })
+  kindField.append(kindSelect)
+  form.append(kindField)
+
   const actions = element('div', 'edit-actions')
 
   const discard = element(
@@ -240,7 +282,9 @@ function editForm(timer: LiveTimer): HTMLElement {
   save.addEventListener('click', () => {
     const title = draftTitle.trim()
     const project = draftProject === '' ? null : draftProject
-    if (title === '' && project === null) {
+    const previousKind = timer.kind ?? ''
+    const kind = draftKind === previousKind ? null : draftKind === '' ? 'none' : draftKind
+    if (title === '' && project === null && kind === null) {
       failure = {
         kind: 'cli-failed',
         message: 'Ponle al menos un título o un proyecto.',
@@ -252,7 +296,7 @@ function editForm(timer: LiveTimer): HTMLElement {
     }
     editing = null
     confirmingDiscard = false
-    void act(() => amendTimer(timer.id, title === '' ? null : title, project))
+    void act(() => amendTimer(timer.id, title === '' ? null : title, project, kind))
   })
 
   actions.append(discard, element('span', 'spacer'), cancel, save)
@@ -451,14 +495,22 @@ async function start(): Promise<void> {
   launchForm.addEventListener('submit', (event) => {
     event.preventDefault()
     const title = launchTitle.value.trim()
+    const kind = launchKindValue === '' ? null : launchKindValue
     launchTitle.value = ''
-    void act(() => startTimer(title === '' ? null : title, null))
+    setLaunchKind('')
+    void act(() => startTimer(title === '' ? null : title, null, kind))
   })
 
   launchBlank.addEventListener('click', () => {
+    const kind = launchKindValue === '' ? null : launchKindValue
     launchTitle.value = ''
-    void act(() => startTimer(null, null))
+    setLaunchKind('')
+    void act(() => startTimer(null, null, kind))
   })
+
+  for (const button of launchKind.querySelectorAll<HTMLButtonElement>('[data-kind]')) {
+    button.addEventListener('click', () => setLaunchKind(button.dataset['kind'] ?? ''))
+  }
 
   notesButton.addEventListener('click', () => {
     void openNotes(null)
