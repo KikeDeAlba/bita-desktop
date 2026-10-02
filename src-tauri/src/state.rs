@@ -20,6 +20,7 @@ struct Running {
     started_at: DateTime<Utc>,
     start_local: String,
     draft: bool,
+    kind: Option<String>,
 }
 
 impl Running {
@@ -44,6 +45,7 @@ impl Running {
             started_at,
             start_local: entry.start_local.clone(),
             draft,
+            kind: entry.kind.clone(),
         })
     }
 
@@ -65,6 +67,7 @@ impl Running {
             start_local: self.start_local.clone(),
             elapsed_seconds: self.elapsed(now),
             draft: self.draft,
+            kind: self.kind.clone(),
         }
     }
 }
