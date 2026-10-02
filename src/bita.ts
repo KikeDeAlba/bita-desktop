@@ -32,6 +32,18 @@ export interface LiveTimer {
   startLocal: string
   elapsedSeconds: number
   draft: boolean
+  kind: string | null
+}
+
+export const MEETING_KINDS = {
+  'remote-meeting': 'Reunión remota',
+  'in-person-meeting': 'Reunión presencial',
+} as const
+
+export type MeetingKind = keyof typeof MEETING_KINDS
+
+export function isMeetingKind(value: string | null): value is MeetingKind {
+  return value !== null && value in MEETING_KINDS
 }
 
 export interface Snapshot {
@@ -60,8 +72,12 @@ export function projects(): Promise<Project[]> {
   return invoke<Project[]>('projects')
 }
 
-export function startTimer(title: string | null, project: string | null): Promise<Snapshot> {
-  return invoke<Snapshot>('start_timer', { title, project })
+export function startTimer(
+  title: string | null,
+  project: string | null,
+  kind: string | null = null,
+): Promise<Snapshot> {
+  return invoke<Snapshot>('start_timer', { title, project, kind })
 }
 
 export function stopTimer(id: number): Promise<Snapshot> {
@@ -76,8 +92,9 @@ export function amendTimer(
   id: number,
   title: string | null,
   project: string | null,
+  kind: string | null = null,
 ): Promise<Snapshot> {
-  return invoke<Snapshot>('amend_timer', { id, title, project })
+  return invoke<Snapshot>('amend_timer', { id, title, project, kind })
 }
 
 export interface Group {

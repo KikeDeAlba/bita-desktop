@@ -61,6 +61,7 @@ pub async fn start_timer(
     app: AppHandle,
     title: Option<String>,
     project: Option<String>,
+    kind: Option<String>,
 ) -> Result<Snapshot, Problem> {
     let mut args: Vec<String> = vec!["start".into()];
     if let Some(title) = title.as_ref().map(|value| value.trim()) {
@@ -71,6 +72,10 @@ pub async fn start_timer(
     if let Some(project) = project {
         args.push("--project".into());
         args.push(project);
+    }
+    if let Some(kind) = kind.filter(|value| !value.trim().is_empty()) {
+        args.push("--kind".into());
+        args.push(kind);
     }
     act(app, args).await
 }
@@ -91,6 +96,7 @@ pub async fn amend_timer(
     id: i64,
     title: Option<String>,
     project: Option<String>,
+    kind: Option<String>,
 ) -> Result<Snapshot, Problem> {
     let mut args: Vec<String> = vec!["amend".into(), id.to_string()];
     if let Some(title) = title.as_ref().map(|value| value.trim()) {
@@ -102,6 +108,10 @@ pub async fn amend_timer(
     if let Some(project) = project {
         args.push("--project".into());
         args.push(project);
+    }
+    if let Some(kind) = kind.filter(|value| !value.trim().is_empty()) {
+        args.push("--kind".into());
+        args.push(kind);
     }
     act(app, args).await
 }

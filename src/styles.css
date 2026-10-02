@@ -542,6 +542,49 @@ input {
   background: var(--estimate);
 }
 
+.kind-picker {
+  display: flex;
+  gap: 4px;
+}
+
+.kind-picker button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 6px;
+  border: 1px solid var(--elev);
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--fg-mute);
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.kind-picker button[aria-checked='true'] {
+  border-color: var(--running);
+  background: var(--inset);
+  color: var(--fg-bright);
+}
+
+.timer-kind {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0 0 0;
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.rec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+}
+
 .launcher .quiet-link {
   align-self: flex-start;
 }
