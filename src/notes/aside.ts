@@ -1,5 +1,6 @@
 import type { DocHeading, PageBacklogItem, PageDocument, PageEntryRow, PageIssue, PageRef } from '../bita.ts'
 import { element, icon } from '../dom.ts'
+import { durationLabel, isRemote, minutesCounts, type MeetingContext } from './meeting.ts'
 
 export interface AsideHandlers {
   onHeading: (anchor: string) => void
@@ -10,6 +11,7 @@ export interface AsideHandlers {
   onBacklogItem: (id: number) => void
   onCollapse: () => void
   onExpand: () => void
+  onOpenFolder: (dir: string) => void
 }
 
 export interface AsideState {
@@ -18,6 +20,7 @@ export interface AsideState {
   open: boolean
   logOpen: boolean
   onToggleLog: () => void
+  meeting: MeetingContext | null
 }
 
 export function renderAside(host: HTMLElement, state: AsideState, handlers: AsideHandlers): void {
@@ -45,6 +48,11 @@ export function renderAside(host: HTMLElement, state: AsideState, handlers: Asid
     body.append(element('p', 'aside-empty', 'Abre una página.'))
     host.replaceChildren(head, body)
     return
+  }
+
+  if (state.meeting !== null) {
+    body.append(...meetingBlocks(state.meeting, handlers))
+    body.append(divider())
   }
 
   body.append(outlineBlock(page.doc.outline, state.active, handlers))
@@ -289,4 +297,64 @@ function categoryColor(category: PageIssue['statusCategory']): string {
   if (category === 'indeterminate') return 'var(--estimate)'
   if (category === 'new') return 'var(--blue)'
   return 'var(--elev-strong)'
+}
+
+function meetingBlocks(meeting: MeetingContext, handlers: AsideHandlers): HTMLElement[] {
+  const blocks: HTMLElement[] = []
+  const load = meeting.load
+
+  if (load.state === 'ready' && load.view.summaryMarkdown !== null) {
+    const counts = minutesCounts(load.view.summaryMarkdown)
+    const block = element('div', 'aside-block')
+    block.append(element('div', 'aside-label', 'En la minuta'))
+    const grid = element('div', 'meeting-counts')
+    for (const [value, label] of [
+      [counts.agreements, counts.agreements === 1 ? 'acuerdo' : 'acuerdos'],
+      [counts.pending, counts.pending === 1 ? 'pendiente' : 'pendientes'],
+      [counts.questions, counts.questions === 1 ? 'pregunta' : 'preguntas'],
+    ] as const) {
+      const cell = element('div', 'meeting-count')
+      cell.append(element('span', 'meeting-count-figure', String(value)), element('span', 'meeting-count-label', label))
+      grid.append(cell)
+    }
+    block.append(grid)
+    blocks.push(block, divider())
+  }
+
+  const block = element('div', 'aside-block')
+  block.append(element('div', 'aside-label', 'Grabación'))
+  const facts = element('div', 'meeting-facts')
+  facts.append(
+    element(
+      'span',
+      '',
+      `${isRemote(meeting.info) ? 'Pantalla, sistema y micrófono' : 'Micrófono'} · ${durationLabel(meeting.info.durationSeconds)}`,
+    ),
+  )
+  if (load.state === 'ready') {
+    facts.append(element('span', '', 'Transcrita con whisper'), element('span', '', 'Minuta por Claude'))
+    block.append(facts)
+    const open = document.createElement('button')
+    open.type = 'button'
+    open.className = 'ghost-button meeting-folder'
+    open.append(icon('folder', 13), document.createTextNode('Abrir carpeta'))
+    const dir = load.view.dir
+    open.addEventListener('click', () => handlers.onOpenFolder(dir))
+    block.append(open)
+  } else {
+    facts.append(
+      element(
+        'span',
+        'aside-note',
+        load.state === 'loading'
+          ? 'Leyendo la reunión…'
+          : load.state === 'missing'
+            ? 'La grabación ya no está en este equipo.'
+            : 'No pude leer la reunión.',
+      ),
+    )
+    block.append(facts)
+  }
+  blocks.push(block)
+  return blocks
 }

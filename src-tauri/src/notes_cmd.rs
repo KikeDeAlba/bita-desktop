@@ -209,7 +209,7 @@ pub async fn open_document(rel_path: String) -> Result<(), Problem> {
 const ASSET_MAX_BYTES: u64 = 10 * 1024 * 1024;
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-fn base64(bytes: &[u8]) -> String {
+pub(crate) fn base64(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
         let triple = (u32::from(chunk[0]) << 16)
