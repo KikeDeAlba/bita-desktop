@@ -137,6 +137,12 @@ pub struct Group {
     pub part_count: u32,
     #[serde(default)]
     pub jira_project_key: Option<String>,
+    #[serde(default = "goes_to_jira")]
+    pub jira: bool,
+}
+
+pub fn goes_to_jira() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -145,6 +151,28 @@ pub struct SummaryData {
     pub total_seconds: i64,
     pub total_human: String,
     pub groups: Vec<Group>,
+    #[serde(default)]
+    pub jira_seconds: Option<i64>,
+    #[serde(default)]
+    pub non_jira_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NonJiraProject {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub total_seconds: i64,
+    pub total_human: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NonJira {
+    pub total_seconds: i64,
+    pub total_human: String,
+    #[serde(default)]
+    pub projects: Vec<NonJiraProject>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,6 +202,8 @@ pub struct SummaryMeta {
     pub overlaps: Vec<Overlap>,
     #[serde(default)]
     pub excluded: Vec<Excluded>,
+    #[serde(default)]
+    pub non_jira: Option<NonJira>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -181,6 +211,9 @@ pub struct SummaryMeta {
 pub struct SummaryView {
     pub total_seconds: i64,
     pub total_human: String,
+    pub jira_seconds: i64,
+    pub non_jira_seconds: i64,
+    pub non_jira: Option<NonJira>,
     pub estimate_seconds: i64,
     pub groups: Vec<Group>,
     pub overlaps: Vec<Overlap>,

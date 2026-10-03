@@ -4,6 +4,7 @@ mod doctor;
 mod menu;
 mod model;
 mod notes;
+mod meeting;
 mod notes_cmd;
 mod panel;
 mod pasteboard;
@@ -65,6 +66,8 @@ fn main() {
             notes_cmd::page_asset,
             notes_cmd::open_external,
             notes_cmd::copy_text,
+            meeting::meeting_for_entry,
+            meeting::open_meeting_folder,
             commands::quit
         ])
         .setup(|app| {

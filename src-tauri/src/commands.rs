@@ -26,6 +26,8 @@ pub struct Project {
     pub client_name: Option<String>,
     #[serde(default)]
     pub jira_project_key: Option<String>,
+    #[serde(default = "crate::model::goes_to_jira")]
+    pub jira: bool,
 }
 
 #[tauri::command]
@@ -129,11 +131,19 @@ async fn summary_view(app: &AppHandle, args: &[&str]) -> Result<SummaryView, Pro
     let cli = app.state::<AppState>().require_cli(app).await?;
     let (data, meta) = cli.call_with_meta::<SummaryData>(args).await?;
     let meta: SummaryMeta = serde_json::from_value(meta).unwrap_or_default();
-    let estimate_seconds = data.groups.iter().map(|group| group.estimate_seconds).sum();
+    let estimate_seconds = data
+        .groups
+        .iter()
+        .filter(|group| group.jira)
+        .map(|group| group.estimate_seconds)
+        .sum();
 
     Ok(SummaryView {
         total_seconds: data.total_seconds,
         total_human: data.total_human,
+        jira_seconds: data.jira_seconds.unwrap_or(data.total_seconds),
+        non_jira_seconds: data.non_jira_seconds.unwrap_or(0),
+        non_jira: meta.non_jira,
         estimate_seconds,
         groups: data.groups,
         overlaps: meta.overlaps,

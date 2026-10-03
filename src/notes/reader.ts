@@ -5,6 +5,15 @@ import { resetPage } from './mermaid.ts'
 import { anchorOf } from './sections.ts'
 import { proseControl } from './prose.ts'
 import { assetsRelDirOf } from './drawio.ts'
+import {
+  meetingChip,
+  renderMeeting,
+  renderMinutes,
+  renderTranscript,
+  tabBar,
+  type MeetingContext,
+  type MeetingTab,
+} from './meeting.ts'
 
 export interface ReaderHandlers {
   onPrev: () => void
@@ -16,6 +25,8 @@ export interface ReaderHandlers {
   onCrumb: (pageId: number) => void
   onExpandRail: () => void
   onExpandAside: () => void
+  onMeetingTab: (tab: MeetingTab) => void
+  onSeek: (seconds: number) => void
 }
 
 export interface ReaderState {
@@ -29,6 +40,7 @@ export interface ReaderState {
   canNext: boolean
   railOpen: boolean
   asideOpen: boolean
+  meeting: MeetingContext | null
 }
 
 export function renderReader(host: HTMLElement, state: ReaderState, handlers: ReaderHandlers): void {
@@ -47,7 +59,25 @@ export function renderReader(host: HTMLElement, state: ReaderState, handlers: Re
     return
   }
 
-  host.replaceChildren(bar(state, handlers), header(state, handlers), body(state, handlers), footer(state, handlers))
+  const meeting = state.meeting
+  if (meeting === null || meeting.tab === 'document') {
+    host.replaceChildren(bar(state, handlers), header(state, handlers), body(state, handlers), footer(state, handlers))
+    return
+  }
+
+  const meetingHandlers = {
+    onTab: handlers.onMeetingTab,
+    onSeek: handlers.onSeek,
+    onLink: handlers.onOpenExternal,
+    onCopy: handlers.onCopy,
+  }
+  const content =
+    meeting.tab === 'minutes'
+      ? renderMinutes(meeting, meetingHandlers)
+      : meeting.tab === 'transcript'
+        ? renderTranscript(meeting, meetingHandlers)
+        : renderMeeting(meeting)
+  host.replaceChildren(bar(state, handlers), header(state, handlers), content)
 }
 
 function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
@@ -136,6 +166,10 @@ function header(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
   head.append(meta)
 
   if (page.issues.length > 0) head.append(tasks(page.issues, handlers))
+  if (state.meeting !== null) {
+    head.append(meetingChip(state.meeting.info))
+    head.append(tabBar(state.meeting.info, state.meeting.tab, handlers.onMeetingTab))
+  }
   return head
 }
 

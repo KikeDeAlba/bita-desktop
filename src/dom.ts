@@ -20,6 +20,30 @@ interface IconShape {
 const ICONS: Record<string, IconShape> = {
   stop: { view: '0 0 14 14', path: '<rect x="3" y="3" width="8" height="8" rx="1.6" fill="currentColor"/>' },
   play: { view: '0 0 12 12', path: '<path d="M3.6 2.4 9.4 6 3.6 9.6Z" fill="currentColor"/>' },
+  pause: { view: '0 0 12 12', path: '<path d="M3 2.2h2.2v7.6H3zM6.8 2.2H9v7.6H6.8z" fill="currentColor"/>' },
+  mic: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="5.5" y="1.5" width="5" height="8" rx="2.5"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2"/>',
+  },
+  screen: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="1.5" y="3" width="13" height="8.5" rx="1.5"/><path d="M5.5 14h5"/>',
+  },
+  rewind: { view: '0 0 16 16', stroke: true, path: '<path d="M3 4v3.5h3.5"/><path d="M3.5 7.5A5 5 0 1 1 5 11.5"/>' },
+  captions: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M4.5 10h3M9.5 10h2"/>',
+  },
+  fullscreen: { view: '0 0 16 16', stroke: true, path: '<path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/>' },
+  folder: { view: '0 0 16 16', stroke: true, path: '<path d="M2 4.5h4l1.5 1.5H14v6.5H2z"/>' },
+  copy: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5"/>',
+  },
   doc: {
     view: '0 0 16 16',
     stroke: true,

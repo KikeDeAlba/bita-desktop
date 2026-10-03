@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 
 export const SNAPSHOT_EVENT = 'bita://snapshot'
@@ -58,6 +58,7 @@ export interface Project {
   active: boolean
   clientName: string | null
   jiraProjectKey: string | null
+  jira: boolean
 }
 
 export function snapshot(): Promise<Snapshot> {
@@ -110,6 +111,13 @@ export interface Group {
   partIndex: number
   partCount: number
   jiraProjectKey: string | null
+  jira: boolean
+}
+
+export interface NonJira {
+  totalSeconds: number
+  totalHuman: string
+  projects: { name: string | null; totalSeconds: number; totalHuman: string }[]
 }
 
 export interface Overlap {
@@ -130,6 +138,9 @@ export interface Excluded {
 export interface SummaryView {
   totalSeconds: number
   totalHuman: string
+  jiraSeconds: number
+  nonJiraSeconds: number
+  nonJira: NonJira | null
   estimateSeconds: number
   groups: Group[]
   overlaps: Overlap[]
@@ -329,6 +340,40 @@ export interface PageIssue {
   refreshedAt: string | null
 }
 
+export interface PageMeeting {
+  entryId: number
+  kind: string
+  startedAt: string
+  stoppedAt: string | null
+  durationSeconds: number
+}
+
+export interface MeetingSegment {
+  startMs: number
+  endMs: number
+  channel: 'mic' | 'system' | string
+  text: string
+}
+
+export interface MeetingFrame {
+  timeSeconds: number
+  src: string
+}
+
+export interface MeetingView {
+  id: string
+  title: string
+  mode: 'remote' | 'in-person' | string
+  status: string
+  dir: string
+  startedAt: string | null
+  durationSeconds: number | null
+  recording: string | null
+  summaryMarkdown: string | null
+  segments: MeetingSegment[]
+  frames: MeetingFrame[]
+}
+
 export interface PageNode {
   pageId: number
   parentId: number | null
@@ -350,6 +395,7 @@ export interface PageNode {
   byteSize: number
   recordedAt: string
   childCount: number
+  meetings?: PageMeeting[]
   children?: PageNode[]
 }
 
@@ -544,6 +590,18 @@ export function backlogSetStatus(
 
 export function backlogSetKind(id: number, kind: BacklogKind): Promise<CliPayload<BacklogItem, unknown>> {
   return invoke('backlog_set_kind', { id, kind })
+}
+
+export function meetingForEntry(entryId: number): Promise<MeetingView | null> {
+  return invoke<MeetingView | null>('meeting_for_entry', { entryId })
+}
+
+export function openMeetingFolder(dir: string): Promise<void> {
+  return invoke<void>('open_meeting_folder', { dir })
+}
+
+export function mediaSrc(path: string): string {
+  return convertFileSrc(path)
 }
 
 export function pageAsset(relPath: string): Promise<string | null> {
