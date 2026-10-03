@@ -58,6 +58,7 @@ export interface Project {
   active: boolean
   clientName: string | null
   jiraProjectKey: string | null
+  jira: boolean
 }
 
 export function snapshot(): Promise<Snapshot> {
@@ -110,6 +111,13 @@ export interface Group {
   partIndex: number
   partCount: number
   jiraProjectKey: string | null
+  jira: boolean
+}
+
+export interface NonJira {
+  totalSeconds: number
+  totalHuman: string
+  projects: { name: string | null; totalSeconds: number; totalHuman: string }[]
 }
 
 export interface Overlap {
@@ -130,6 +138,9 @@ export interface Excluded {
 export interface SummaryView {
   totalSeconds: number
   totalHuman: string
+  jiraSeconds: number
+  nonJiraSeconds: number
+  nonJira: NonJira | null
   estimateSeconds: number
   groups: Group[]
   overlaps: Overlap[]

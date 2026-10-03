@@ -196,3 +196,64 @@ fn the_vendored_cli_lists_the_backlog_the_app_paints() {
 
     let _ = fs::remove_file(&database);
 }
+
+#[test]
+fn the_vendored_cli_reports_projects_outside_jira_apart() {
+    let entry = vendored_cli();
+    assert!(entry.is_file(), "the bita submodule is not checked out");
+
+    let Some(node) = node() else {
+        panic!("no node found; this app cannot work without one");
+    };
+
+    let database = env::temp_dir().join(format!("bita-contract-jira-{}.db", std::process::id()));
+    let _ = fs::remove_file(&database);
+
+    let run = |args: &[&str]| -> serde_json::Value {
+        let output = Command::new(&node)
+            .arg(&entry)
+            .args(args)
+            .arg("--json")
+            .arg("--db-path")
+            .arg(&database)
+            .current_dir("/")
+            .env("BITA_NO_HOOKS", "1")
+            .stdin(Stdio::null())
+            .output()
+            .expect("run the vendored CLI");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        serde_json::from_str(stdout.trim()).expect("the CLI printed one JSON document")
+    };
+
+    assert_eq!(run(&["project", "add", "Con Jira"])["ok"].as_bool(), Some(true));
+    let outside = run(&["project", "add", "Sin Jira", "--no-jira"]);
+    assert_eq!(outside["data"]["jira"].as_bool(), Some(false), "{outside}");
+
+    let projects = run(&["projects"]);
+    let flags: Vec<(String, bool)> = projects["data"]
+        .as_array()
+        .expect("projects")
+        .iter()
+        .map(|project| {
+            (
+                project["name"].as_str().unwrap_or_default().to_string(),
+                project["jira"].as_bool().expect("every project says whether it goes to Jira"),
+            )
+        })
+        .collect();
+    assert!(flags.contains(&("Sin Jira".to_string(), false)), "{flags:?}");
+
+    for (title, project) in [("Algo para Jira", "Con Jira"), ("Algo fuera", "Sin Jira")] {
+        let logged = run(&["log", title, "--project", project, "--from", "00:10", "--for", "30m"]);
+        assert_eq!(logged["ok"].as_bool(), Some(true), "{logged}");
+    }
+
+    let pending = run(&["summary", "--pending"]);
+    assert_eq!(pending["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+    let groups = pending["data"]["groups"].as_array().expect("groups");
+    assert!(groups.iter().all(|group| group["jira"].as_bool() == Some(true)), "{pending}");
+    assert_eq!(pending["meta"]["nonJira"]["totalSeconds"].as_i64(), Some(1800), "{pending}");
+    assert_eq!(pending["data"]["nonJiraSeconds"].as_i64(), Some(1800), "{pending}");
+
+    let _ = fs::remove_file(&database);
+}

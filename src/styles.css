@@ -1160,3 +1160,18 @@ input {
   flex-shrink: 0;
   color: var(--elev-strong);
 }
+
+.tag--muted {
+  background: none;
+  border: 1px dashed var(--elev-strong);
+  color: var(--fg-mute);
+}
+
+.meter-track--outside {
+  background: none;
+  border: 1px dashed var(--elev);
+}
+
+.meter-track--outside .meter-fill {
+  background: var(--fg-faint);
+}
