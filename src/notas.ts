@@ -6,6 +6,8 @@ import {
   type BacklogStatus,
   copyText,
   describeProblem,
+  meetingForEntry,
+  openMeetingFolder,
   notesDocument,
   notesSearch,
   notesTakeFocus,
@@ -26,6 +28,15 @@ import { renderAside, type AsideState } from './notes/aside.ts'
 import { renderRail, pageKey, spaceKey, type RailState, type Selection } from './notes/rail.ts'
 import { renderReader, type ReaderState } from './notes/reader.ts'
 import { attachSash } from './notes/sash.ts'
+import {
+  isRemote,
+  latestMeeting,
+  seekTo,
+  stopPlayback,
+  type MeetingContext,
+  type MeetingLoad,
+  type MeetingTab,
+} from './notes/meeting.ts'
 import { initProse, stepProse } from './notes/prose.ts'
 import {
   ALL_PROJECTS,
@@ -77,6 +88,10 @@ let backlogCopied: string | null = null
 let backlogFailure: Problem | null = null
 const backlogBusy = new Set<number>()
 let copiedTimer = 0
+let meetingTab: MeetingTab = 'document'
+let meetingLoad: MeetingLoad | null = null
+let meetingPageId: number | null = null
+let meetingToken = 0
 
 let railPainted = ''
 let readerPainted = ''
@@ -181,11 +196,25 @@ function readerState(): ReaderState {
     canNext: at !== -1 && at < order.length - 1,
     railOpen,
     asideOpen,
+    meeting: meetingContext(),
   }
 }
 
+function meetingContext(): MeetingContext | null {
+  if (opened === null || meetingLoad === null) return null
+  const info = latestMeeting(opened.meetings)
+  if (info === null) return null
+  return { info, tab: meetingTab, load: meetingLoad }
+}
+
 function asideState(): AsideState {
-  return { page: opened, active, open: asideOpen, logOpen, onToggleLog: toggleLog }
+  return { page: opened, active, open: asideOpen, logOpen, onToggleLog: toggleLog, meeting: meetingContext() }
+}
+
+function meetingSignature(): string {
+  if (meetingLoad === null) return 'none'
+  const view = meetingLoad.state === 'ready' ? meetingLoad.view.id : ''
+  return `${meetingTab}:${meetingLoad.state}:${view}`
 }
 
 function railSignature(): string {
@@ -215,6 +244,7 @@ function readerSignature(): string {
     loadingDoc,
     railOpen,
     asideOpen,
+    meetingSignature(),
   ].join('~')
 }
 
@@ -229,6 +259,7 @@ function asideSignature(): string {
     active ?? '',
     asideOpen,
     logOpen,
+    meetingLoad?.state ?? 'none',
   ].join('~')
 }
 
@@ -296,6 +327,8 @@ function paint(): void {
       onCrumb: selectPage,
       onExpandRail: () => setRail(true),
       onExpandAside: () => setAside(true),
+      onMeetingTab: setMeetingTab,
+      onSeek: seekMeeting,
     })
     afterReaderPaint()
   }
@@ -314,8 +347,46 @@ function paint(): void {
       onBacklogItem: openBacklogItem,
       onCollapse: () => setAside(false),
       onExpand: () => setAside(true),
+      onOpenFolder: (dir) => {
+        void openMeetingFolder(dir).catch(showFailure)
+      },
     })
   }
+}
+
+function setMeetingTab(tab: MeetingTab): void {
+  if (tab === meetingTab) return
+  meetingTab = tab
+  if (tab === 'document') stopPlayback()
+  paint()
+}
+
+function seekMeeting(seconds: number): void {
+  const context = meetingContext()
+  if (context === null || context.load.state !== 'ready') return
+  const view = context.load.view
+  const target: MeetingTab = isRemote(context.info) ? 'meeting' : 'transcript'
+  if (meetingTab !== target) {
+    meetingTab = target
+    paint()
+  }
+  seekTo(view, seconds)
+}
+
+async function loadMeeting(pageId: number, entryId: number): Promise<void> {
+  const token = meetingToken + 1
+  meetingToken = token
+  if (meetingPageId !== pageId || meetingLoad === null) meetingLoad = { state: 'loading' }
+  paint()
+  try {
+    const view = await meetingForEntry(entryId)
+    if (token !== meetingToken) return
+    meetingLoad = view === null ? { state: 'missing' } : { state: 'ready', view }
+  } catch (error) {
+    if (token !== meetingToken) return
+    meetingLoad = { state: 'failed', problem: describeProblem(error) }
+  }
+  paint()
 }
 
 function setRail(open: boolean): void {
@@ -557,6 +628,18 @@ async function loadPage(pageId: number): Promise<void> {
     if (selected?.kind !== 'page' || selected.id !== pageId) return
     opened = payload.data
     loadingDoc = false
+    const info = latestMeeting(opened.meetings)
+    if (meetingPageId !== pageId) {
+      meetingTab = 'document'
+      stopPlayback()
+    }
+    if (info === null) {
+      meetingLoad = null
+      meetingPageId = pageId
+    } else if (meetingPageId !== pageId || meetingLoad?.state !== 'ready') {
+      void loadMeeting(pageId, info.entryId)
+      meetingPageId = pageId
+    }
   } catch (error) {
     if (selected?.kind !== 'page' || selected.id !== pageId) return
     loadingDoc = false

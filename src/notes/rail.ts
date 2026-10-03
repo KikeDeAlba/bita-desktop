@@ -1,6 +1,9 @@
 import type { PageNode, SearchHit, Space } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import { projectColor } from '../tabs.ts'
+import { durationLabel, isRemote, latestMeeting, meetingShortDay } from './meeting.ts'
+
+const RECENT_MEETINGS = 5
 
 export type Selection = { kind: 'page' | 'entry' | 'backlog'; id: number } | null
 
@@ -65,7 +68,54 @@ export function renderRail(host: HTMLElement, state: RailState, handlers: RailHa
     return
   }
   body.append(backlogRow(state, handlers))
+  const meetings = meetingsSection(state, handlers)
+  if (meetings !== null) body.append(meetings)
   renderTree(body, state, handlers)
+}
+
+function meetingPages(spaces: Space[]): PageNode[] {
+  const found: PageNode[] = []
+  const walk = (pages: PageNode[]): void => {
+    for (const page of pages) {
+      if (latestMeeting(page.meetings) !== null) found.push(page)
+      walk(page.children ?? [])
+    }
+  }
+  for (const space of spaces) walk(space.pages)
+  return found.sort((left, right) =>
+    (latestMeeting(right.meetings)?.startedAt ?? '').localeCompare(latestMeeting(left.meetings)?.startedAt ?? ''),
+  )
+}
+
+function meetingsSection(state: RailState, handlers: RailHandlers): HTMLElement | null {
+  const pages = meetingPages(state.spaces)
+  if (pages.length === 0) return null
+  const section = element('div', 'rail-meetings')
+  const head = element('div', 'rail-meetings-head')
+  head.append(element('span', 'rail-meetings-title', 'Reuniones'), element('span', 'project-count', String(pages.length)))
+  section.append(head)
+  for (const page of pages.slice(0, RECENT_MEETINGS)) {
+    const meeting = latestMeeting(page.meetings)
+    if (meeting === null) continue
+    const on = state.selected?.kind === 'page' && state.selected.id === page.pageId
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = on ? 'meeting-row meeting-row--on' : 'meeting-row'
+    row.setAttribute('aria-current', String(on))
+    const lines = element('span', 'meeting-row-lines')
+    lines.append(
+      element('span', 'meeting-row-title', page.title),
+      element(
+        'span',
+        'meeting-row-meta',
+        `${page.projectName ?? 'Sin proyecto'} · ${isRemote(meeting) ? 'remota' : 'presencial'} · ${durationLabel(meeting.durationSeconds)}`,
+      ),
+    )
+    row.append(element('span', 'meeting-row-day', meetingShortDay(meeting.startedAt)), lines)
+    row.addEventListener('click', () => handlers.onSelectPage(page.pageId))
+    section.append(row)
+  }
+  return section
 }
 
 function freshChrome(host: HTMLElement, state: RailState, handlers: RailHandlers): HTMLElement {
@@ -235,7 +285,15 @@ function pageBlock(page: PageNode, state: RailState, handlers: RailHandlers, lev
   }
 
   const name = element('span', 'page-name', page.title)
-  row.append(chevron, name)
+  row.append(chevron)
+  const meeting = latestMeeting(page.meetings)
+  if (meeting !== null) {
+    const glyph = element('span', isRemote(meeting) ? 'page-meeting page-meeting--remote' : 'page-meeting')
+    glyph.setAttribute('aria-label', isRemote(meeting) ? 'Salió de una reunión remota' : 'Salió de una reunión presencial')
+    glyph.append(icon(isRemote(meeting) ? 'screen' : 'mic', 12))
+    row.append(glyph)
+  }
+  row.append(name)
   if (page.issues.length > 0) {
     row.append(element('span', 'page-count', String(page.issues.length)))
   }
