@@ -1,4 +1,4 @@
-import type { Group, Project, Scope, SummaryView } from './bita.ts'
+import type { Group, NonJira, Project, Scope, SummaryView } from './bita.ts'
 import { element } from './dom.ts'
 import { human } from './format.ts'
 
@@ -40,7 +40,7 @@ function groupRow(group: Group, widest: number): HTMLElement {
   const head = element('div', 'group-head')
   const title = element('span', 'group-title', group.summary)
   const worked = element('span', 'group-worked', group.totalHuman)
-  const estimate = element('span', 'group-estimate', `→ ${group.estimateHuman}`)
+  const estimate = element('span', 'group-estimate', group.jira ? `→ ${group.estimateHuman}` : 'sin Jira')
   head.append(title, worked, estimate)
 
   const meta = element('div', 'group-meta')
@@ -57,10 +57,11 @@ function groupRow(group: Group, widest: number): HTMLElement {
     element('span', undefined, `${group.projectName ?? 'sin proyecto'} · ${blocks}${span}${part}`),
   )
 
-  const track = element('div', 'meter-track')
-  track.style.width = `${Math.max(4, Math.round((group.estimateSeconds / widest) * 100))}%`
+  const span100 = group.jira ? group.estimateSeconds : group.totalSeconds
+  const track = element('div', group.jira ? 'meter-track' : 'meter-track meter-track--outside')
+  track.style.width = `${Math.max(4, Math.round((span100 / widest) * 100))}%`
   const fill = element('div', 'meter-fill')
-  const ratio = group.estimateSeconds === 0 ? 0 : group.totalSeconds / group.estimateSeconds
+  const ratio = span100 === 0 ? 0 : group.totalSeconds / span100
   fill.style.width = `${Math.min(100, Math.round(ratio * 100))}%`
   track.append(fill)
   const meter = element('div', 'meter')
@@ -71,7 +72,10 @@ function groupRow(group: Group, widest: number): HTMLElement {
 }
 
 function groupList(groups: Group[]): HTMLElement {
-  const widest = groups.reduce((most, group) => Math.max(most, group.estimateSeconds), 1)
+  const widest = groups.reduce(
+    (most, group) => Math.max(most, group.jira ? group.estimateSeconds : group.totalSeconds),
+    1,
+  )
   const list = element('div', 'groups')
   for (const group of groups) list.append(groupRow(group, widest))
   return list
@@ -101,6 +105,11 @@ export function renderWorked(
   }
   header.append(toggle)
   view.append(header)
+  if (data.nonJiraSeconds > 0) {
+    view.append(
+      element('p', 'caption', `${human(data.jiraSeconds)} para Jira · ${human(data.nonJiraSeconds)} fuera de Jira`),
+    )
+  }
 
   const days = new Set(data.groups.flatMap((group) => group.days))
   view.append(
@@ -140,6 +149,14 @@ export function renderWorked(
   )
 }
 
+function outsideJira(nonJira: NonJira | null): HTMLElement | null {
+  if (nonJira === null || nonJira.totalSeconds === 0) return null
+  const banner = element('div', 'banner banner--quiet')
+  const names = nonJira.projects.map((project) => `${project.name ?? 'sin proyecto'} ${project.totalHuman}`).join(', ')
+  banner.append(element('span', 'banner-text', `Fuera de Jira: ${nonJira.totalHuman} (${names}). Se mide, pero no se sube.`))
+  return banner
+}
+
 export function renderPending(view: HTMLElement, data: SummaryView): void {
   view.replaceChildren()
 
@@ -153,6 +170,8 @@ export function renderPending(view: HTMLElement, data: SummaryView): void {
       empty.append(element('p', 'empty-note', excludedLine(data)))
     }
     view.append(empty)
+    const outside = outsideJira(data.nonJira)
+    if (outside !== null) view.append(outside)
     return
   }
 
@@ -172,6 +191,8 @@ export function renderPending(view: HTMLElement, data: SummaryView): void {
     banner.append(element('span', 'banner-text', excludedLine(data)))
     view.append(banner)
   }
+  const outside = outsideJira(data.nonJira)
+  if (outside !== null) view.append(outside)
 
   view.append(
     element('p', 'legend', 'Escribir en Jira lo hace Claude, que es quien tiene el conector.'),
@@ -234,7 +255,9 @@ export function renderRepos(
     const dot = element('i', 'dot')
     dot.style.background = projectColor(project.id)
     row.append(dot, element('span', 'project-name', project.name))
-    if (project.jiraProjectKey !== null) {
+    if (!project.jira) {
+      row.append(element('span', 'tag tag--muted', 'sin Jira'))
+    } else if (project.jiraProjectKey !== null) {
       row.append(element('span', 'tag', project.jiraProjectKey))
     }
     projects.append(row)
