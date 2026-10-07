@@ -1,15 +1,20 @@
+mod atlassian_cmd;
 mod cli;
 mod commands;
 mod doctor;
 mod menu;
 mod model;
 mod notes;
+mod media;
 mod meeting;
 mod notes_cmd;
 mod panel;
 mod pasteboard;
+mod pdf;
+mod recap;
 mod screen;
 mod state;
+mod sync;
 mod tray;
 mod watch;
 
@@ -68,6 +73,25 @@ fn main() {
             notes_cmd::copy_text,
             meeting::meeting_for_entry,
             meeting::open_meeting_folder,
+            notes_cmd::notes_search_pages,
+            notes_cmd::backlog_add,
+            media::recap_list,
+            media::search_transcripts,
+            media::meeting_compress,
+            media::meeting_strip_video,
+            media::meeting_prune,
+            media::meeting_delete,
+            media::storage_report,
+            media::reveal_in_finder,
+            pdf::export_pdf,
+            atlassian_cmd::atlassian_sites,
+            atlassian_cmd::atlassian_site_add,
+            atlassian_cmd::atlassian_site_test,
+            atlassian_cmd::atlassian_site_remove,
+            atlassian_cmd::project_atlassian,
+            atlassian_cmd::confluence_sync,
+            atlassian_cmd::confluence_sync_status,
+            atlassian_cmd::confluence_resolve,
             commands::quit
         ])
         .setup(|app| {
@@ -79,6 +103,7 @@ fn main() {
             watch::spawn_docs(app.handle().clone(), cli::docs_root());
             spawn_refresh(app.handle().clone());
             spawn_tick(app.handle().clone());
+            sync::spawn(app.handle().clone());
             if notes::opens_on_start() {
                 notes::open(app.handle(), None)?;
             }

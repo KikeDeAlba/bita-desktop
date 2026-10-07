@@ -1,6 +1,6 @@
-import type { DocHeading, PageBacklogItem, PageDocument, PageEntryRow, PageIssue, PageRef } from '../bita.ts'
+import type { DocHeading, PageBacklogItem, PageDocument, PageEntryRow, PageIssue, PageRef, SpaceAtlassian } from '../bita.ts'
 import { element, icon } from '../dom.ts'
-import { durationLabel, isRemote, minutesCounts, type MeetingContext } from './meeting.ts'
+import { durationLabel, hasVideo, isRemote, minutesCounts, type MeetingContext } from './meeting.ts'
 
 export interface AsideHandlers {
   onHeading: (anchor: string) => void
@@ -12,6 +12,7 @@ export interface AsideHandlers {
   onCollapse: () => void
   onExpand: () => void
   onOpenFolder: (dir: string) => void
+  onHit: (index: number) => void
 }
 
 export interface AsideState {
@@ -21,6 +22,11 @@ export interface AsideState {
   logOpen: boolean
   onToggleLog: () => void
   meeting: MeetingContext | null
+  query: string
+  hits: string[]
+  hit: number
+  atlassian: SpaceAtlassian | null
+  custom: HTMLElement[] | null
 }
 
 export function renderAside(host: HTMLElement, state: AsideState, handlers: AsideHandlers): void {
@@ -32,7 +38,7 @@ export function renderAside(host: HTMLElement, state: AsideState, handlers: Asid
   }
 
   const head = element('div', 'aside-head')
-  head.append(element('span', 'aside-title', 'En esta página'))
+  head.append(element('span', 'aside-title', state.custom === null ? 'En esta página' : 'Resumen'))
   const fold = document.createElement('button')
   fold.type = 'button'
   fold.className = 'icon-button'
@@ -44,10 +50,22 @@ export function renderAside(host: HTMLElement, state: AsideState, handlers: Asid
   const body = element('div', 'aside-body')
   const page = state.page
 
+  if (state.custom !== null) {
+    const block = element('div', 'aside-block')
+    block.append(...state.custom)
+    body.append(block)
+    host.replaceChildren(head, body)
+    return
+  }
+
   if (page === null) {
     body.append(element('p', 'aside-empty', 'Abre una página.'))
     host.replaceChildren(head, body)
     return
+  }
+
+  if (state.query.trim().length > 0 && state.hits.length > 0) {
+    body.append(hitsBlock(state, handlers), divider())
   }
 
   if (state.meeting !== null) {
@@ -56,6 +74,9 @@ export function renderAside(host: HTMLElement, state: AsideState, handlers: Asid
   }
 
   body.append(outlineBlock(page.doc.outline, state.active, handlers))
+
+  const sync = syncBlock(state.atlassian)
+  if (sync !== null) body.append(divider(), sync)
 
   if (page.issues.length > 0 || page.worklogIssues.length > 0) {
     body.append(divider())
@@ -84,6 +105,49 @@ export function renderAside(host: HTMLElement, state: AsideState, handlers: Asid
   }
 
   host.replaceChildren(head, body)
+}
+
+function hitsBlock(state: AsideState, handlers: AsideHandlers): HTMLElement {
+  const block = element('div', 'aside-block')
+  block.append(element('div', 'aside-label', 'Coincidencias aquí'))
+  state.hits.forEach((label, index) => {
+    const row = document.createElement('button')
+    row.type = 'button'
+    row.className = index === state.hit ? 'aside-hit aside-hit--on' : 'aside-hit'
+    row.append(element('span', 'kbd', String(index + 1)), element('span', 'aside-hit-text', label))
+    row.addEventListener('click', () => handlers.onHit(index))
+    block.append(row)
+  })
+  return block
+}
+
+function syncAge(iso: string): string {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000))
+  if (Number.isNaN(minutes)) return iso.slice(0, 16)
+  if (minutes < 1) return 'hace un momento'
+  if (minutes < 60) return `hace ${minutes} min`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `hace ${hours} h`
+  const days = Math.round(hours / 24)
+  return days === 1 ? 'hace 1 día' : `hace ${days} días`
+}
+
+function syncBlock(atlassian: SpaceAtlassian | null): HTMLElement | null {
+  if (atlassian === null || atlassian.confluence === null) return null
+  const block = element('div', 'aside-block')
+  block.append(element('div', 'aside-label', 'Confluence'))
+  const line = element('span', 'aside-sync')
+  const dot = element('span', 'dot')
+  const on = atlassian.sync.pull || atlassian.sync.push
+  dot.style.background = on ? 'var(--aqua)' : 'var(--fg-faint)'
+  const text = !on
+    ? 'Sincronización apagada'
+    : atlassian.sync.lastSyncAt === null
+      ? 'Todavía no se sincroniza'
+      : `Sincronizado ${syncAge(atlassian.sync.lastSyncAt)}`
+  line.append(dot, element('span', '', text))
+  block.append(line)
+  return block
 }
 
 function collapsedStrip(handlers: AsideHandlers): HTMLElement {
@@ -328,7 +392,7 @@ function meetingBlocks(meeting: MeetingContext, handlers: AsideHandlers): HTMLEl
     element(
       'span',
       '',
-      `${isRemote(meeting.info) ? 'Pantalla, sistema y micrófono' : 'Micrófono'} · ${durationLabel(meeting.info.durationSeconds)}`,
+      `${!isRemote(meeting.info) ? 'Micrófono' : load.state === 'ready' && !hasVideo(load.view) ? 'Sistema y micrófono, sin video' : 'Pantalla, sistema y micrófono'} · ${durationLabel(meeting.info.durationSeconds)}`,
     ),
   )
   if (load.state === 'ready') {

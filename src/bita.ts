@@ -4,6 +4,8 @@ import { listen } from '@tauri-apps/api/event'
 export const SNAPSHOT_EVENT = 'bita://snapshot'
 export const DOCS_CHANGED_EVENT = 'bita://docs-changed'
 export const NOTES_FOCUS_EVENT = 'bita://notes-focus'
+export const MEETING_MEDIA_EVENT = 'bita://meeting-media-changed'
+export const SYNC_FINISHED_EVENT = 'bita://confluence-synced'
 
 export type ProblemKind =
   | 'node-missing'
@@ -372,6 +374,167 @@ export interface MeetingView {
   summaryMarkdown: string | null
   segments: MeetingSegment[]
   frames: MeetingFrame[]
+  hasVideo: boolean
+  storage: MeetingStorage | null
+  video: MeetingVideoInfo | null
+  videoRemovedAt: string | null
+}
+
+export interface MeetingStorage {
+  recordingBytes: number
+  intermediateBytes: number
+  framesBytes: number
+  otherBytes: number
+  totalBytes: number
+}
+
+export interface MeetingVideoInfo {
+  compressedAt: string
+  preset: CompressPreset
+  originalBytes: number
+}
+
+export type CompressPreset = 'light' | 'medium' | 'max'
+
+export interface MeetingRecord {
+  id: string
+  title: string
+  mode: 'remote' | 'in-person' | string
+  status: string
+  createdAt: string
+  startedAt?: string | null
+  endedAt?: string | null
+  durationSeconds?: number | null
+  bitaEntryId?: number | null
+  dir: string
+  recording?: string | null
+  transcript?: string | null
+  summary?: string | null
+  transcriptSegments?: string | null
+  frames?: string | null
+  hasVideo: boolean
+  storage: MeetingStorage
+  video?: MeetingVideoInfo | null
+  videoRemovedAt?: string | null
+}
+
+export interface MeetingMediaChange {
+  id: string
+  ok: boolean
+  error: string | null
+  record: MeetingRecord | null
+}
+
+export interface MeetingDeleted {
+  id: string
+  dir: string
+  freedBytes: number
+}
+
+export interface StorageReport {
+  dbBytes: number
+  docsBytes: number
+  recapAvailable: boolean
+  meetings: MeetingRecord[]
+}
+
+export interface TranscriptMatch {
+  startMs: number | null
+  prefix: string
+  match: string
+  suffix: string
+}
+
+export interface TranscriptHit {
+  entryId: number
+  meetingId: string
+  matchCount: number
+  matches: TranscriptMatch[]
+}
+
+export interface PageSearchMatch {
+  source: 'page' | 'entry'
+  entryId?: number
+  section: string | null
+  line: number
+  prefix: string
+  match: string
+  suffix: string
+}
+
+export interface PageSearchHit {
+  pageId: number
+  title: string
+  projectId: number | null
+  projectName: string | null
+  projectSlug: string
+  relPath: string
+  ancestors: { pageId: number; title: string }[]
+  matchCount: number
+  sources: { page: number; entries: number }
+  matches: PageSearchMatch[]
+}
+
+export type AtlassianVia = 'mcp' | 'cli'
+
+export interface ConfluenceRef {
+  kind: 'space' | 'page'
+  url: string
+  spaceKey: string | null
+  pageId: string | null
+  title: string | null
+}
+
+export interface SpaceAtlassian {
+  site: string | null
+  via: AtlassianVia
+  confluence: ConfluenceRef | null
+  sync: { pull: boolean; push: boolean; lastSyncAt: string | null }
+}
+
+export type SiteStatus = 'ok' | 'auth_failed' | 'unreachable' | 'unknown'
+
+export interface AtlassianSite {
+  site: string
+  email: string
+  tokenStored: boolean
+  jira: boolean
+  confluence: boolean
+  projects: string[]
+  status: SiteStatus
+}
+
+export interface SyncItem {
+  pageId?: number | null
+  confluenceId?: string | null
+  title: string
+  reason?: string | null
+}
+
+export interface SyncResult {
+  project: string
+  pulled: SyncItem[]
+  pushed: SyncItem[]
+  created: SyncItem[]
+  conflicts: SyncItem[]
+  skipped: SyncItem[]
+}
+
+export interface SyncMapping {
+  pageId: number
+  title: string
+  confluenceId: string
+  confluenceTitle: string
+  state: 'synced' | 'conflict'
+  direction: string
+}
+
+export interface AtlassianSettings {
+  site?: string | null
+  via?: AtlassianVia | null
+  confluence?: string | null
+  pull?: boolean | null
+  push?: boolean | null
 }
 
 export interface PageNode {
@@ -407,6 +570,7 @@ export interface Space {
   entryCount: number
   pageCount: number
   pages: PageNode[]
+  atlassian?: SpaceAtlassian | null
 }
 
 export interface PageEntryRow {
@@ -590,6 +754,103 @@ export function backlogSetStatus(
 
 export function backlogSetKind(id: number, kind: BacklogKind): Promise<CliPayload<BacklogItem, unknown>> {
   return invoke('backlog_set_kind', { id, kind })
+}
+
+export function notesSearchPages(
+  query: string,
+  project: string | null,
+): Promise<CliPayload<PageSearchHit[], unknown>> {
+  return invoke('notes_search_pages', { query, project })
+}
+
+export function backlogAdd(
+  kind: BacklogKind,
+  title: string,
+  body: string | null,
+  pageId: number | null,
+  project: string | null,
+): Promise<CliPayload<BacklogItem, unknown>> {
+  return invoke('backlog_add', { kind, title, body, pageId, project })
+}
+
+export function recapList(): Promise<MeetingRecord[]> {
+  return invoke<MeetingRecord[]>('recap_list')
+}
+
+export function searchTranscripts(query: string, entryIds: number[]): Promise<TranscriptHit[]> {
+  return invoke<TranscriptHit[]>('search_transcripts', { query, entryIds })
+}
+
+export function meetingCompress(id: string, preset: CompressPreset, prune: boolean): Promise<void> {
+  return invoke<void>('meeting_compress', { id, preset, prune })
+}
+
+export function meetingStripVideo(id: string, prune: boolean): Promise<MeetingRecord> {
+  return invoke<MeetingRecord>('meeting_strip_video', { id, prune })
+}
+
+export function meetingPrune(id: string): Promise<MeetingRecord> {
+  return invoke<MeetingRecord>('meeting_prune', { id })
+}
+
+export function meetingDelete(id: string): Promise<MeetingDeleted> {
+  return invoke<MeetingDeleted>('meeting_delete', { id })
+}
+
+export function storageReport(): Promise<StorageReport> {
+  return invoke<StorageReport>('storage_report')
+}
+
+export function exportPdf(fileName: string): Promise<string> {
+  return invoke<string>('export_pdf', { fileName })
+}
+
+export function revealInFinder(path: string): Promise<void> {
+  return invoke<void>('reveal_in_finder', { path })
+}
+
+export function atlassianSites(check: boolean): Promise<AtlassianSite[]> {
+  return invoke<AtlassianSite[]>('atlassian_sites', { check })
+}
+
+export function atlassianSiteAdd(site: string, email: string, token: string): Promise<AtlassianSite | null> {
+  return invoke<AtlassianSite | null>('atlassian_site_add', { site, email, token })
+}
+
+export function atlassianSiteTest(site: string): Promise<AtlassianSite | null> {
+  return invoke<AtlassianSite | null>('atlassian_site_test', { site })
+}
+
+export function atlassianSiteRemove(site: string): Promise<void> {
+  return invoke<void>('atlassian_site_remove', { site })
+}
+
+export function projectAtlassian(project: string, settings: AtlassianSettings): Promise<SpaceAtlassian | null> {
+  return invoke<SpaceAtlassian | null>('project_atlassian', { project, settings })
+}
+
+export function confluenceSync(project: string | null): Promise<SyncResult[]> {
+  return invoke<SyncResult[]>('confluence_sync', { project })
+}
+
+export function confluenceSyncStatus(project: string): Promise<SyncMapping[]> {
+  return invoke<SyncMapping[]>('confluence_sync_status', { project })
+}
+
+export function confluenceResolve(pageId: number, keep: 'local' | 'remote'): Promise<void> {
+  return invoke<void>('confluence_resolve', { pageId, keep })
+}
+
+export function onMeetingMediaChanged(handler: (change: MeetingMediaChange) => void): void {
+  void listen<MeetingMediaChange>(MEETING_MEDIA_EVENT, (event) => {
+    handler(event.payload)
+  })
+}
+
+export function onSyncFinished(handler: () => void): void {
+  void listen(SYNC_FINISHED_EVENT, () => {
+    handler()
+  })
 }
 
 export function meetingForEntry(entryId: number): Promise<MeetingView | null> {

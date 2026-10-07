@@ -28,6 +28,22 @@ async fn payload(app: &AppHandle, args: &[&str]) -> Result<CliPayload, Problem> 
     Ok(CliPayload { data, meta })
 }
 
+pub(crate) async fn payload_with(
+    app: &AppHandle,
+    args: &[&str],
+    options: cli::CallOptions,
+) -> Result<CliPayload, Problem> {
+    let handle = app.state::<AppState>().require_cli(app).await?;
+    let (data, meta) = handle
+        .call_with_options::<serde_json::Value>(args, options)
+        .await
+        .map_err(stale_cli)?;
+    Ok(CliPayload {
+        data: data.unwrap_or(serde_json::Value::Null),
+        meta,
+    })
+}
+
 fn stale_cli(problem: Problem) -> Problem {
     let message = if problem.message.contains("was written by a newer version") {
         "La base de datos la escribió un bita más nuevo que el CLI instalado.".to_string()
@@ -103,6 +119,80 @@ pub async fn notes_search(
         args.push(project);
     }
     payload(&app, &args).await
+}
+
+#[tauri::command]
+pub async fn notes_search_pages(
+    app: AppHandle,
+    query: String,
+    project: Option<String>,
+) -> Result<CliPayload, Problem> {
+    let needle = query.trim();
+    if needle.is_empty() {
+        return Err(Problem::new(
+            ProblemKind::CliFailed,
+            "La búsqueda necesita algo que buscar.",
+        ));
+    }
+    let args = page_search_args(needle, project.as_deref());
+    payload(&app, &args).await.map_err(stale_pages)
+}
+
+fn page_search_args<'a>(needle: &'a str, project: Option<&'a str>) -> Vec<&'a str> {
+    let mut args = vec!["docs", "search", needle, "--pages"];
+    if let Some(project) = project.filter(|value| !value.trim().is_empty()) {
+        args.push("--project");
+        args.push(project);
+    }
+    args
+}
+
+fn stale_pages(problem: Problem) -> Problem {
+    if problem.message.contains("Unknown option") || problem.message.contains("--pages") {
+        return crate::atlassian_cmd::too_old();
+    }
+    problem
+}
+
+#[tauri::command]
+pub async fn backlog_add(
+    app: AppHandle,
+    kind: String,
+    title: String,
+    body: Option<String>,
+    page_id: Option<i64>,
+    project: Option<String>,
+) -> Result<CliPayload, Problem> {
+    let kind = backlog_kind(&kind)?;
+    let title = title.trim();
+    if title.is_empty() {
+        return Err(Problem::new(ProblemKind::CliFailed, "El ítem necesita un título."));
+    }
+    let page = page_id.map(|id| id.to_string());
+    let args = add_args(kind, title, body.as_deref(), page.as_deref(), project.as_deref());
+    payload(&app, &args).await.map_err(stale_backlog)
+}
+
+fn add_args<'a>(
+    kind: &'a str,
+    title: &'a str,
+    body: Option<&'a str>,
+    page: Option<&'a str>,
+    project: Option<&'a str>,
+) -> Vec<&'a str> {
+    let mut args = vec!["backlog", "add", "--kind", kind, "--title", title];
+    if let Some(body) = body.map(str::trim).filter(|text| !text.is_empty()) {
+        args.push("--body");
+        args.push(body);
+    }
+    if let Some(page) = page {
+        args.push("--page");
+        args.push(page);
+    } else if let Some(project) = project.filter(|value| !value.trim().is_empty()) {
+        args.push("--project");
+        args.push(project);
+    }
+    args
 }
 
 #[tauri::command]
@@ -443,6 +533,28 @@ mod tests {
         assert_eq!(super::backlog_kind("pending").ok(), Some("pending"));
         assert_eq!(super::backlog_kind("finding").ok(), Some("finding"));
         assert!(super::backlog_kind("bug").is_err());
+    }
+
+    #[test]
+    fn a_page_search_asks_for_pages_and_scopes_only_with_a_project() {
+        assert_eq!(super::page_search_args("ssm", None), vec!["docs", "search", "ssm", "--pages"]);
+        assert_eq!(
+            super::page_search_args("ssm", Some("codi")),
+            vec!["docs", "search", "ssm", "--pages", "--project", "codi"]
+        );
+        assert_eq!(super::page_search_args("ssm", Some(" ")), vec!["docs", "search", "ssm", "--pages"]);
+    }
+
+    #[test]
+    fn a_new_item_goes_to_its_page_or_else_its_project() {
+        assert_eq!(
+            super::add_args("pending", "Rotar", Some(" "), None, Some("codi")),
+            vec!["backlog", "add", "--kind", "pending", "--title", "Rotar", "--project", "codi"]
+        );
+        assert_eq!(
+            super::add_args("finding", "X", Some("cuerpo"), Some("7"), Some("codi")),
+            vec!["backlog", "add", "--kind", "finding", "--title", "X", "--body", "cuerpo", "--page", "7"]
+        );
     }
 
     #[test]

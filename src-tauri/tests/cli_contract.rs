@@ -257,3 +257,147 @@ fn the_vendored_cli_reports_projects_outside_jira_apart() {
 
     let _ = fs::remove_file(&database);
 }
+
+const ALTERNATIVE_CLI_ENV: &str = "BITA_CONTRACT_CLI";
+
+struct Sandbox {
+    node: PathBuf,
+    entry: PathBuf,
+    root: PathBuf,
+}
+
+impl Sandbox {
+    fn new(name: &str) -> Option<Self> {
+        let entry = PathBuf::from(env::var_os(ALTERNATIVE_CLI_ENV)?);
+        assert!(entry.is_file(), "{ALTERNATIVE_CLI_ENV} points at {} which is not a file", entry.display());
+        let node = node().expect("no node found; this app cannot work without one");
+        let root = env::temp_dir().join(format!("bita-contract-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("home")).expect("sandbox home");
+        Some(Self { node, entry, root })
+    }
+
+    fn run(&self, args: &[&str], stdin: Option<&str>) -> serde_json::Value {
+        use std::io::Write;
+        let mut child = Command::new(&self.node)
+            .arg(&self.entry)
+            .args(args)
+            .arg("--json")
+            .arg("--db-path")
+            .arg(self.root.join("bita.db"))
+            .arg("--docs-dir")
+            .arg(self.root.join("docs"))
+            .current_dir("/")
+            .env("HOME", self.root.join("home"))
+            .env("XDG_CONFIG_HOME", self.root.join("home/.config"))
+            .env("XDG_DATA_HOME", self.root.join("home/.local/share"))
+            .env("BITA_NO_HOOKS", "1")
+            .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("run the alternative CLI");
+        if let Some(text) = stdin {
+            let mut pipe = child.stdin.take().expect("stdin");
+            pipe.write_all(text.as_bytes()).expect("write stdin");
+        }
+        let output = child.wait_with_output().expect("wait for the CLI");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        serde_json::from_str(stdout.trim()).unwrap_or_else(|_| {
+            panic!(
+                "{args:?} did not print one JSON document: {stdout} {}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+    }
+}
+
+impl Drop for Sandbox {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+#[test]
+fn the_new_cli_searches_by_page() {
+    let Some(sandbox) = Sandbox::new("pages") else { return };
+    assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
+    let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
+    assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
+    let page_id = page["data"]["page"]["pageId"]
+        .as_i64()
+        .or_else(|| page["data"]["pageId"].as_i64())
+        .expect("the new page has an id");
+    let markdown = sandbox.root.join("body.md");
+    fs::write(&markdown, "## Contexto\n\nLa paridad del kernel compartido exige la misma rama.\n").expect("body");
+    let wrote = sandbox.run(
+        &["docs", "page", "write", &page_id.to_string(), "--md", &markdown.display().to_string()],
+        None,
+    );
+    assert_eq!(wrote["ok"].as_bool(), Some(true), "{wrote}");
+
+    let found = sandbox.run(&["docs", "search", "paridad", "--pages", "--project", "Contrato"], None);
+    assert_eq!(found["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+    assert_eq!(found["ok"].as_bool(), Some(true), "{found}");
+    let hit = &found["data"][0];
+    for field in [
+        "pageId", "title", "projectId", "projectName", "projectSlug", "relPath", "ancestors", "matchCount",
+        "sources", "matches",
+    ] {
+        assert!(hit.get(field).is_some(), "page hits lost {field}: {hit}");
+    }
+    assert!(hit["sources"].get("page").is_some() && hit["sources"].get("entries").is_some(), "{hit}");
+    let first = &hit["matches"][0];
+    for field in ["source", "section", "line", "prefix", "match", "suffix"] {
+        assert!(first.get(field).is_some(), "page matches lost {field}: {first}");
+    }
+}
+
+#[test]
+fn the_new_cli_keeps_atlassian_settings_per_space() {
+    let Some(sandbox) = Sandbox::new("atlassian") else { return };
+    assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
+    let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
+    assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
+    let set = sandbox.run(
+        &[
+            "project", "atlassian", "Contrato", "--via", "cli", "--confluence", "STI", "--pull", "on", "--push", "off",
+        ],
+        None,
+    );
+    assert_eq!(set["ok"].as_bool(), Some(true), "{set}");
+
+    let tree = sandbox.run(&["docs", "tree", "--pages", "--months"], None);
+    let space = tree["data"]["spaces"]
+        .as_array()
+        .expect("spaces")
+        .iter()
+        .find(|space| space["projectName"].as_str() == Some("Contrato"))
+        .cloned()
+        .expect("the space is listed");
+    let atlassian = &space["atlassian"];
+    assert_eq!(atlassian["via"].as_str(), Some("cli"), "{space}");
+    assert_eq!(atlassian["sync"]["pull"].as_bool(), Some(true), "{space}");
+    assert_eq!(atlassian["sync"]["push"].as_bool(), Some(false), "{space}");
+    assert!(atlassian["sync"].get("lastSyncAt").is_some(), "{space}");
+    assert_eq!(atlassian["confluence"]["kind"].as_str(), Some("space"), "{space}");
+    assert_eq!(atlassian["confluence"]["spaceKey"].as_str(), Some("STI"), "{space}");
+
+    let status = sandbox.run(&["confluence", "sync", "status", "Contrato"], None);
+    assert_eq!(status["ok"].as_bool(), Some(true), "{status}");
+    assert!(status["data"].is_array(), "{status}");
+}
+
+#[test]
+fn the_new_cli_lists_atlassian_sites() {
+    let Some(sandbox) = Sandbox::new("sites") else { return };
+    let listed = sandbox.run(&["atlassian", "site", "ls"], None);
+    assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+    assert_eq!(listed["ok"].as_bool(), Some(true), "{listed}");
+    assert!(listed["data"].is_array(), "{listed}");
+    for site in listed["data"].as_array().expect("sites") {
+        for field in ["site", "email", "tokenStored", "jira", "confluence", "projects", "status"] {
+            assert!(site.get(field).is_some(), "sites lost {field}: {site}");
+        }
+    }
+}

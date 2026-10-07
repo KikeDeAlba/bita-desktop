@@ -4,31 +4,15 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use tokio::process::Command;
-use tokio::time::timeout;
 
-use crate::cli::node;
 use crate::model::{Problem, ProblemKind};
 use crate::notes_cmd::base64;
+use crate::recap::recap_call;
 
-const RECAP_OVERRIDE_ENV: &str = "RECAP_CLI";
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 const FRAMES_MAX: usize = 60;
 const FRAME_MAX_BYTES: u64 = 4 * 1024 * 1024;
-
-#[derive(Debug, Deserialize)]
-struct Envelope {
-    ok: bool,
-    #[serde(default)]
-    data: Option<Record>,
-    #[serde(default)]
-    error: Option<EnvelopeError>,
-}
-
-#[derive(Debug, Deserialize)]
-struct EnvelopeError {
-    code: String,
-    message: String,
-}
+const VIDEO_EXTENSIONS: [&str; 3] = ["mp4", "mov", "m4v"];
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,6 +34,38 @@ struct Record {
     transcript_segments: Option<String>,
     #[serde(default)]
     frames: Option<String>,
+    #[serde(default)]
+    has_video: Option<bool>,
+    #[serde(default)]
+    storage: Option<MeetingStorage>,
+    #[serde(default)]
+    video: Option<VideoInfo>,
+    #[serde(default)]
+    video_removed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingStorage {
+    #[serde(default)]
+    pub recording_bytes: u64,
+    #[serde(default)]
+    pub intermediate_bytes: u64,
+    #[serde(default)]
+    pub frames_bytes: u64,
+    #[serde(default)]
+    pub other_bytes: u64,
+    #[serde(default)]
+    pub total_bytes: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoInfo {
+    pub compressed_at: String,
+    pub preset: String,
+    #[serde(default)]
+    pub original_bytes: u64,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -89,27 +105,13 @@ pub struct MeetingView {
     pub summary_markdown: Option<String>,
     pub segments: Vec<Segment>,
     pub frames: Vec<Frame>,
+    pub has_video: bool,
+    pub storage: Option<MeetingStorage>,
+    pub video: Option<VideoInfo>,
+    pub video_removed_at: Option<String>,
 }
 
-fn recap_binary() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os(RECAP_OVERRIDE_ENV) {
-        let path = PathBuf::from(explicit);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    let mut candidates = Vec::new();
-    if let Some(home) = node::home() {
-        candidates.push(home.join(".local/bin/recap"));
-        candidates.push(home.join("Applications/Recap.app/Contents/MacOS/recap"));
-    }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/recap"));
-    candidates.push(PathBuf::from("/usr/local/bin/recap"));
-    candidates.push(PathBuf::from("/Applications/Recap.app/Contents/MacOS/recap"));
-    candidates.into_iter().find(|candidate| candidate.is_file())
-}
-
-fn inside(dir: &Path, path: &str) -> Option<PathBuf> {
+pub(crate) fn inside(dir: &Path, path: &str) -> Option<PathBuf> {
     let candidate = PathBuf::from(path);
     let resolved = if candidate.is_absolute() { candidate } else { dir.join(candidate) };
     let canonical = std::fs::canonicalize(&resolved).ok()?;
@@ -144,49 +146,18 @@ fn read_frames(dir: &Path, index: &Path) -> Vec<Frame> {
 
 #[tauri::command]
 pub async fn meeting_for_entry(app: AppHandle, entry_id: i64) -> Result<Option<MeetingView>, Problem> {
-    let Some(recap) = recap_binary() else {
-        return Err(Problem::new(
-            ProblemKind::CliFailed,
-            "recap no está instalado en este equipo, así que no puedo mostrar la reunión.",
-        )
-        .with_hint(Some("bita setup".into())));
+    let entry = entry_id.to_string();
+    let data = match recap_call(&["show", "--bita-entry", &entry], CALL_TIMEOUT).await {
+        Ok(data) => data,
+        Err(error) if error.is_not_found() => return Ok(None),
+        Err(error) => return Err(error.into()),
     };
-
-    let mut command = Command::new(&recap);
-    command
-        .args(["show", "--bita-entry", &entry_id.to_string(), "--json"])
-        .current_dir("/")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .kill_on_drop(true);
-    if let Some(home) = node::home() {
-        command.env("HOME", home);
+    if data.is_null() {
+        return Ok(None);
     }
-
-    let output = timeout(CALL_TIMEOUT, command.output())
-        .await
-        .map_err(|_| Problem::new(ProblemKind::CliFailed, "recap no respondió a tiempo."))?
-        .map_err(|error| Problem::new(ProblemKind::CliFailed, format!("No pude ejecutar recap: {error}")))?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let envelope: Envelope = serde_json::from_str(stdout.trim()).map_err(|error| {
+    let record: Record = serde_json::from_value(data).map_err(|error| {
         Problem::new(ProblemKind::Unreadable, format!("No entiendo la respuesta de recap: {error}"))
     })?;
-
-    if !envelope.ok {
-        let error = envelope.error.unwrap_or(EnvelopeError {
-            code: "UNKNOWN".into(),
-            message: "recap falló sin decir por qué.".into(),
-        });
-        if error.code == "MEETING_NOT_FOUND" {
-            return Ok(None);
-        }
-        return Err(Problem::new(ProblemKind::CliFailed, format!("{} ({})", error.message, error.code)));
-    }
-
-    let Some(record) = envelope.data else {
-        return Ok(None);
-    };
     let dir = PathBuf::from(&record.dir);
     if !dir.join("meeting.json").is_file() {
         return Ok(None);
@@ -218,6 +189,8 @@ pub async fn meeting_for_entry(app: AppHandle, entry_id: i64) -> Result<Option<M
         let _ = app.asset_protocol_scope().allow_file(path);
     }
 
+    let has_video = record.has_video.unwrap_or_else(|| recording.as_deref().is_some_and(is_video_file));
+
     Ok(Some(MeetingView {
         id: record.id,
         title: record.title,
@@ -230,7 +203,17 @@ pub async fn meeting_for_entry(app: AppHandle, entry_id: i64) -> Result<Option<M
         summary_markdown,
         segments,
         frames,
+        has_video,
+        storage: record.storage,
+        video: record.video,
+        video_removed_at: record.video_removed_at,
     }))
+}
+
+pub(crate) fn is_video_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|value| VIDEO_EXTENSIONS.contains(&value.to_ascii_lowercase().as_str()))
 }
 
 #[tauri::command]
@@ -252,8 +235,17 @@ pub async fn open_meeting_folder(dir: String) -> Result<(), Problem> {
 
 #[cfg(test)]
 mod tests {
-    use super::inside;
+    use super::{inside, is_video_file};
     use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn only_video_containers_count_as_video() {
+        assert!(is_video_file(Path::new("/x/recording.mp4")));
+        assert!(is_video_file(Path::new("/x/recording.MOV")));
+        assert!(!is_video_file(Path::new("/x/recording.m4a")));
+        assert!(!is_video_file(Path::new("/x/recording")));
+    }
 
     #[test]
     fn only_files_inside_the_meeting_folder_are_read() {
