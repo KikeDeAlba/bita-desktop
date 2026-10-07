@@ -35,9 +35,10 @@ let context: AtlassianContext | null = null
 let root: HTMLElement | null = null
 
 export function renderAtlassian(target: HTMLElement, next: AtlassianContext): void {
+  const entering = !(host === target && mounted())
   host = target
   context = next
-  if (sites === null && failure === null) void load(false)
+  if (entering || (sites === null && failure === null)) void load(false)
   paint(true)
 }
 
