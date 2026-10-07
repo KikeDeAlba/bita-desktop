@@ -118,6 +118,30 @@ const ICONS: Record<string, IconShape> = {
     stroke: true,
     path: '<path d="M2.6 9.2 4.4 3.6h7.2l1.8 5.6v3.2a.8.8 0 0 1-.8.8H3.4a.8.8 0 0 1-.8-.8Z"/><path d="M2.6 9.2h3.2l.8 1.6h2.8l.8-1.6h3.2"/>',
   },
+  image: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="2" y="3.2" width="12" height="9.6" rx="1.4"/><circle cx="6" cy="6.6" r="1.2"/><path d="M14 10.6 10.6 7.2 5 12.8"/>',
+  },
+  refresh: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M2.8 8a5.2 5.2 0 0 1 9.2-3.4l1.2 1.4M13.2 2.8V6H10M13.2 8A5.2 5.2 0 0 1 4 11.4L2.8 10M2.8 13.2V10H6"/>',
+  },
+  link: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M6.8 9.2a2.6 2.6 0 0 0 3.8 0l2-2a2.7 2.7 0 0 0-3.8-3.8l-.7.7M9.2 6.8a2.6 2.6 0 0 0-3.8 0l-2 2a2.7 2.7 0 0 0 3.8 3.8l.7-.7"/>',
+  },
+  warning: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M8 2.2 14.6 13.6H1.4Z"/><path d="M8 6.6v3M8 11.6v.2"/>',
+  },
+  more: {
+    view: '0 0 16 16',
+    path: '<circle cx="3.6" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="12.4" cy="8" r="1.2" fill="currentColor"/>',
+  },
 }
 
 export function icon(name: keyof typeof ICONS, size = 12): SVGSVGElement {
