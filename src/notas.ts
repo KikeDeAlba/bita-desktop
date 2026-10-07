@@ -1260,7 +1260,7 @@ async function start(): Promise<void> {
   onMeetingMediaChanged((change) => {
     void loadRecords()
     refreshStorageTotal()
-    if (change.ok && meetingLoad?.state === 'ready' && meetingLoad.view.id === change.id) reloadMeeting()
+    if (meetingLoad?.state === 'ready' && meetingLoad.view.id === change.id) reloadMeeting()
     else paint()
   })
   onMediaJobs(() => {

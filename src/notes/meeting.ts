@@ -2,6 +2,7 @@ import { mediaSrc, type MeetingSegment, type MeetingView, type PageMeeting, type
 import { element, icon } from '../dom.ts'
 import { human } from '../format.ts'
 import { renderMarkdown } from './markdown.ts'
+import { formatBytes } from './media-dialogs.ts'
 import './room.css'
 
 export type MeetingTab = 'document' | 'minutes' | 'meeting'
@@ -953,6 +954,5 @@ export function renderRoom(context: MeetingContext, handlers: MeetingHandlers, i
 }
 
 function sizeLabel(bytes: number): string {
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
-  return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`
+  return formatBytes(bytes)
 }

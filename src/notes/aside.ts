@@ -1,6 +1,6 @@
 import type { DocHeading, PageBacklogItem, PageDocument, PageEntryRow, PageIssue, PageRef, SpaceAtlassian } from '../bita.ts'
 import { element, icon } from '../dom.ts'
-import { durationLabel, isRemote, minutesCounts, type MeetingContext } from './meeting.ts'
+import { durationLabel, hasVideo, isRemote, minutesCounts, type MeetingContext } from './meeting.ts'
 
 export interface AsideHandlers {
   onHeading: (anchor: string) => void
@@ -392,7 +392,7 @@ function meetingBlocks(meeting: MeetingContext, handlers: AsideHandlers): HTMLEl
     element(
       'span',
       '',
-      `${isRemote(meeting.info) ? 'Pantalla, sistema y micrófono' : 'Micrófono'} · ${durationLabel(meeting.info.durationSeconds)}`,
+      `${!isRemote(meeting.info) ? 'Micrófono' : load.state === 'ready' && !hasVideo(load.view) ? 'Sistema y micrófono, sin video' : 'Pantalla, sistema y micrófono'} · ${durationLabel(meeting.info.durationSeconds)}`,
     ),
   )
   if (load.state === 'ready') {
