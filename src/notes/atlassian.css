@@ -1,0 +1,275 @@
+.ac-root {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.ac-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--radius-control);
+  color: var(--fg-mute);
+  font-size: 12px;
+}
+
+.ac-back:hover {
+  background: var(--card);
+  color: var(--fg);
+}
+
+.ac-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ac-main {
+  padding: 24px 32px 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-content: flex-start;
+}
+
+.ac-list {
+  flex: 3 1 480px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ac-title {
+  margin: 0;
+  font-size: 24px;
+  color: var(--fg-bright);
+  letter-spacing: -0.01em;
+}
+
+.ac-lede {
+  margin: 6px 0 0;
+  max-width: 620px;
+  color: var(--fg-dim);
+}
+
+.ac-empty {
+  margin: 0;
+  color: var(--fg-mute);
+}
+
+.ac-site {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--card-quiet);
+  border: 1px solid var(--line);
+  transition: border-color 120ms ease;
+}
+
+.ac-site:hover {
+  border-color: var(--elev-strong);
+}
+
+.ac-site--warn,
+.ac-site--warn:hover {
+  border-color: rgba(250, 189, 47, 0.35);
+}
+
+.ac-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  color: #1d2021;
+}
+
+.ac-site-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ac-site-name {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.ac-site-host {
+  color: var(--fg-bright);
+  font-weight: 600;
+}
+
+.ac-pills {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ac-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  font-size: 11px;
+  background: var(--card);
+  color: var(--fg-dim);
+}
+
+.ac-pill--ok {
+  background: rgba(184, 187, 38, 0.14);
+  color: var(--ok);
+}
+
+.ac-pill--warn {
+  background: rgba(250, 189, 47, 0.14);
+  color: var(--estimate);
+}
+
+.ac-pill--mcp {
+  background: rgba(131, 165, 152, 0.16);
+  color: var(--blue);
+}
+
+.ac-site-note {
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+.ac-site-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ac-remove {
+  width: 32px;
+  padding: 0;
+  color: var(--fg-dim);
+}
+
+.ac-remove:hover:not(:disabled) {
+  color: #fb7a6a;
+}
+
+.ac-add {
+  flex: 2 1 300px;
+  min-width: 0;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-quiet);
+}
+
+.ac-add-title {
+  margin: 0;
+  font-size: 15px;
+  color: var(--fg-bright);
+}
+
+.ac-labelled {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ac-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  background: var(--inset);
+  border: 1px solid var(--line);
+  transition: border-color 120ms ease;
+}
+
+.ac-field:hover {
+  border-color: var(--elev-strong);
+}
+
+.ac-field:focus-within {
+  border-color: var(--blue);
+}
+
+.ac-field input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  outline: 0;
+  color: var(--fg);
+  font: inherit;
+}
+
+.ac-submit {
+  height: 34px;
+}
+
+.ac-terminal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.ac-code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--inset);
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  overflow-x: auto;
+  white-space: nowrap;
+  user-select: text;
+}
+
+.ac-problem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(251, 73, 52, 0.1);
+  border: 1px solid rgba(251, 73, 52, 0.3);
+  color: #fb7a6a;
+}
+
+.ac-problem svg {
+  margin-top: 2px;
+  flex: none;
+}
+
+.ac-problem-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ac-problem-hint {
+  color: var(--fg-dim);
+  font-size: 12px;
+}
