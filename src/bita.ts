@@ -377,6 +377,7 @@ export interface MeetingView {
   hasVideo: boolean
   storage: MeetingStorage | null
   video: MeetingVideoInfo | null
+  videoRemovedAt: string | null
 }
 
 export interface MeetingStorage {

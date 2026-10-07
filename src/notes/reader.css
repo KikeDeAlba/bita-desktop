@@ -1,0 +1,148 @@
+#notas .bar-action {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-control);
+  color: var(--fg-dim);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+#notas .bar-action:hover:not(:disabled) {
+  background: var(--card);
+  color: var(--fg);
+}
+
+#notas .bar-action--busy {
+  color: var(--estimate);
+}
+
+#notas .bar-action--busy svg {
+  animation: bar-action-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes bar-action-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+#notas .hit-nav {
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+}
+
+#notas .hit-count {
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#notas .hit-key {
+  padding: 0 6px 0 2px;
+}
+
+#notas .hit-nav .reader-step {
+  border: 0;
+}
+
+#notas .doc-entries {
+  margin-top: 8px;
+}
+
+#notas .doc-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--card-quiet);
+}
+
+#notas .doc-entry .md-paragraph {
+  margin: 0;
+  font-size: 13px;
+}
+
+#notas .aside-hit {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  text-align: left;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+#notas .aside-hit:hover {
+  color: var(--fg);
+}
+
+#notas .aside-hit--on {
+  color: var(--fg-bright);
+}
+
+#notas .aside-hit--on .kbd {
+  color: var(--estimate);
+}
+
+#notas .aside-hit-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+#notas .aside-sync {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+
+#notas .aside-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  background: var(--card);
+}
+
+#notas .aside-stat-figure {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  color: var(--fg-bright);
+}
+
+#notas .aside-stat-figure--warn {
+  color: var(--estimate);
+}
+
+#notas .aside-stat-label {
+  font-size: 12px;
+  color: var(--fg-mute);
+}
+
+#notas .aside-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--blue);
+}
+
+#notas .aside-link:hover {
+  color: var(--fg-bright);
+}

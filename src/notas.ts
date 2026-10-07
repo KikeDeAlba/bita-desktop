@@ -1,53 +1,67 @@
 import {
+  backlogAdd,
   backlogList,
   backlogSetKind,
   backlogSetStatus,
   type BacklogItem,
+  type BacklogKind,
   type BacklogStatus,
   copyText,
   describeProblem,
   meetingForEntry,
   openMeetingFolder,
   notesDocument,
-  notesSearch,
+  notesSearchPages,
   notesTakeFocus,
   notesTree,
   onDocsChanged,
+  onMeetingMediaChanged,
   onNotesFocus,
+  onSyncFinished,
   openDocument,
   openExternal,
   pageDocument,
+  projects,
+  recapList,
+  searchTranscripts,
+  type MeetingRecord,
   type PageDocument,
   type PageNode,
   type Problem,
-  type SearchHit,
   type Space,
 } from './bita.ts'
 import { must } from './dom.ts'
 import { renderAside, type AsideState } from './notes/aside.ts'
-import { renderRail, pageKey, spaceKey, type RailState, type Selection } from './notes/rail.ts'
+import { renderRail, pageKey, type RailState, type Selection } from './notes/rail.ts'
 import { renderReader, type ReaderState } from './notes/reader.ts'
 import { attachSash } from './notes/sash.ts'
 import {
-  isRemote,
+  currentFrameSrc,
+  hasVideo,
   latestMeeting,
+  releaseMedia,
   seekTo,
   stopPlayback,
   type MeetingContext,
   type MeetingLoad,
   type MeetingTab,
 } from './notes/meeting.ts'
+import { fromPageHit, withTranscripts, type PageResult, type SearchScope } from './notes/search.ts'
+import { closeSwitcher, isSwitcherOpen, toggleSwitcher, withPages } from './notes/switcher.ts'
+import { meetingCount, meetingsAside, renderMeetings, type MeetingsContext } from './notes/meetings.ts'
+import { openExportDialog } from './notes/export.ts'
+import { isCompressing, onMediaJobs, openCompressDialog, openStripDialog } from './notes/media-dialogs.ts'
+import { renderStorage, storageTotal } from './notes/storage.ts'
+import { renderSpaceSettings } from './notes/space-settings.ts'
+import { renderAtlassian } from './notes/atlassian.ts'
 import { initProse, stepProse } from './notes/prose.ts'
 import {
-  ALL_PROJECTS,
-  findByKey,
+  focusBacklogItem,
   openCount,
-  projectOf,
   renderBacklog,
-  visibleItems,
-  tabOf,
-  type BacklogState,
-  type BacklogTab,
+  type BacklogContext,
+  type BacklogDraft,
+  type BacklogPage,
 } from './notes/backlog.ts'
 
 const railHost = must<HTMLElement>('#rail')
@@ -57,6 +71,8 @@ const asideHost = must<HTMLElement>('#aside')
 const RAIL_KEY = 'bita.notes.rail'
 const ASIDE_KEY = 'bita.notes.aside'
 const SCALE_KEY = 'bita.notes.scale'
+const SPACE_KEY = 'bita.notes.space'
+const SCOPE_KEY = 'bita.notes.search-scope'
 const SCALE_MIN = 0.8
 const SCALE_MAX = 2
 const SCALE_STEP = 0.1
@@ -67,9 +83,11 @@ let expanded = new Set<string>()
 let selected: Selection = null
 let opened: PageDocument | null = null
 let query = ''
-let results: SearchHit[] | null = null
+let scope: SearchScope = rememberedScope()
+let results: PageResult[] | null = null
 let hit = 0
 let hitCount = 0
+let hitLabels: string[] = []
 let active: string | null = null
 let failure: Problem | null = null
 let loadingTree = true
@@ -79,11 +97,6 @@ let asideOpen = remembered(ASIDE_KEY)
 let logOpen = true
 let scale = rememberedScale()
 let backlog: BacklogItem[] | null = null
-let backlogTab: BacklogTab = 'finding'
-let backlogProject = ALL_PROJECTS
-let backlogQuery = ''
-let backlogSelected: number | null = null
-let backlogDraft = ''
 let backlogCopied: string | null = null
 let backlogFailure: Problem | null = null
 const backlogBusy = new Set<number>()
@@ -93,7 +106,11 @@ let meetingLoad: MeetingLoad | null = null
 let meetingPageId: number | null = null
 let meetingToken = 0
 
-let activeSpace: string | null = null
+let activeSpace: string | null = rememberedText(SPACE_KEY)
+let clients = new Map<number, string>()
+let jiraKeys = new Map<number, string>()
+let records: MeetingRecord[] | null = null
+let storageBytes: number | null = null
 
 let railPainted = ''
 let readerPainted = ''
@@ -107,6 +124,26 @@ function remembered(key: string): boolean {
   } catch {
     return true
   }
+}
+
+function rememberedText(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function rememberText(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value)
+  } catch {
+    return
+  }
+}
+
+function rememberedScope(): SearchScope {
+  return rememberedText(SCOPE_KEY) === 'all' ? 'all' : 'space'
 }
 
 function rememberedScale(): number {
@@ -138,30 +175,52 @@ function remember(key: string, open: boolean): void {
 }
 
 function railState(): RailState {
+  const space = currentSpace()
   return {
     spaces,
+    active: space,
+    client: space?.projectId == null ? null : (clients.get(space.projectId) ?? null),
     expanded,
     selected,
     query,
+    scope,
     results,
-    pageCount,
     loading: loadingTree,
     open: railOpen,
-    backlogOpen: backlog === null ? null : openCount(backlog),
+    backlogOpen: backlog === null ? null : openCount(backlog, backlogScope()),
+    meetingCount: meetingCount(space),
+    storageBytes,
   }
 }
 
-function backlogState(): BacklogState {
+function backlogScope(): number | null | undefined {
+  const space = currentSpace()
+  return space === null ? undefined : space.projectId
+}
+
+function backlogPages(): BacklogPage[] {
+  const pages: BacklogPage[] = []
+  const walk = (list: PageNode[], prefix: string): void => {
+    for (const page of list) {
+      pages.push({ pageId: page.pageId, title: `${prefix}${page.title}` })
+      walk(page.children ?? [], `${prefix}${page.title} / `)
+    }
+  }
+  walk(currentSpace()?.pages ?? [], '')
+  return pages
+}
+
+function backlogState(): BacklogContext {
+  const space = currentSpace()
   return {
     items: backlog,
-    tab: backlogTab,
-    project: backlogProject,
-    query: backlogQuery,
-    selectedId: backlogSelected,
-    draft: backlogDraft,
-    copied: backlogCopied,
     failure: backlogFailure,
     busy: backlogBusy,
+    projectId: backlogScope(),
+    spaceName: space === null ? null : (space.projectName ?? 'Sin proyecto'),
+    pages: backlogPages(),
+    meetingEntryIds: meetingEntryIds(),
+    copied: backlogCopied,
     railOpen,
     now: new Date(),
   }
@@ -170,10 +229,8 @@ function backlogState(): BacklogState {
 function backlogSignature(): string {
   return [
     'backlog',
-    backlogTab,
-    backlogProject,
-    backlogQuery,
-    backlogSelected ?? '',
+    currentSpace()?.projectSlug ?? '',
+    spaces.map((space) => `${space.projectSlug}:${space.pageCount}`).join(','),
     backlogCopied ?? '',
     backlog === null
       ? 'pending'
@@ -199,7 +256,19 @@ function readerState(): ReaderState {
     railOpen,
     asideOpen,
     meeting: meetingContext(),
+    video: videoActions(),
   }
+}
+
+function readyView(): MeetingRecord | null {
+  if (meetingLoad?.state !== 'ready') return null
+  const view = meetingLoad.view
+  return (records ?? []).find((record) => record.id === view.id) ?? null
+}
+
+function videoActions(): ReaderState['video'] {
+  if (meetingLoad?.state !== 'ready' || !hasVideo(meetingLoad.view)) return null
+  return { compressing: isCompressing(meetingLoad.view.id) }
 }
 
 function meetingContext(): MeetingContext | null {
@@ -209,27 +278,68 @@ function meetingContext(): MeetingContext | null {
   return { info, tab: meetingTab, load: meetingLoad }
 }
 
+function meetingsContext(): MeetingsContext {
+  return {
+    space: currentSpace(),
+    records,
+    railOpen,
+    onExpandRail: () => setRail(true),
+    onOpenPage: (pageId) => {
+      meetingTab = 'meeting'
+      selectPage(pageId, true)
+    },
+    onStorage: selectStorage,
+  }
+}
+
 function asideState(): AsideState {
-  return { page: opened, active, open: asideOpen, logOpen, onToggleLog: toggleLog, meeting: meetingContext() }
+  return {
+    page: opened,
+    active,
+    open: asideOpen,
+    logOpen,
+    onToggleLog: toggleLog,
+    meeting: meetingContext(),
+    query: selected?.kind === 'page' ? query : '',
+    hits: hitLabels,
+    hit,
+    atlassian: currentSpace()?.atlassian ?? null,
+    custom: selected?.kind === 'meetings' ? meetingsAside(meetingsContext()) : null,
+  }
 }
 
 function meetingSignature(): string {
   if (meetingLoad === null) return 'none'
-  const view = meetingLoad.state === 'ready' ? meetingLoad.view.id : ''
-  return `${meetingTab}:${meetingLoad.state}:${view}`
+  const view = meetingLoad.state === 'ready' ? `${meetingLoad.view.id}:${meetingLoad.view.recording ?? ''}` : ''
+  const busy = meetingLoad.state === 'ready' ? isCompressing(meetingLoad.view.id) : false
+  return `${meetingTab}:${meetingLoad.state}:${view}:${busy}`
+}
+
+function spacesSignature(): string {
+  return spaces
+    .map((space) => {
+      const sync = space.atlassian?.sync
+      return `${space.projectSlug}:${space.pageCount}:${sync?.pull ?? ''}:${sync?.push ?? ''}:${sync?.lastSyncAt ?? ''}`
+    })
+    .join(',')
 }
 
 function railSignature(): string {
   return [
-    spaces.map((space) => `${space.projectSlug}:${space.pageCount}`).join(','),
+    spacesSignature(),
+    activeSpace ?? '',
+    currentSpace()?.pages.length ?? 0,
+    clients.size,
     pageCount,
     [...expanded].sort().join('|'),
     selected === null ? 'none' : `${selected.kind}:${selected.id}`,
     query,
-    results === null ? 'pending' : results.map((entry) => entry.entryId).join('.'),
+    scope,
+    results === null ? 'pending' : results.map((result) => `${result.pageId}:${result.matchCount}`).join('.'),
     loadingTree,
     railOpen,
-    backlog === null ? 'pending' : openCount(backlog),
+    backlog === null ? 'pending' : openCount(backlog, backlogScope()),
+    storageBytes ?? '',
   ].join('~')
 }
 
@@ -252,6 +362,7 @@ function readerSignature(): string {
 
 function asideSignature(): string {
   return [
+    selected?.kind ?? 'none',
     opened?.pageId ?? 'none',
     opened?.recordedAt ?? '',
     opened?.entries.length ?? 0,
@@ -262,77 +373,103 @@ function asideSignature(): string {
     asideOpen,
     logOpen,
     meetingLoad?.state ?? 'none',
+    query,
+    hit,
+    hitLabels.join('|'),
+    spacesSignature(),
+    activeSpace ?? '',
+    selected?.kind === 'meetings' ? (records === null ? 'pending' : records.map((record) => `${record.id}:${record.storage.totalBytes}`).join(',')) : '',
+  ].join('~')
+}
+
+function viewSignature(kind: string): string {
+  return [
+    kind,
+    spacesSignature(),
+    activeSpace ?? '',
+    railOpen,
+    kind === 'meetings' ? (records === null ? 'pending' : records.map((record) => `${record.id}:${record.storage.totalBytes}:${record.hasVideo}`).join(',')) : '',
   ].join('~')
 }
 
 function paint(): void {
-  must<HTMLElement>('#notas').classList.toggle('notas--backlog', selected?.kind === 'backlog')
+  const root = must<HTMLElement>('#notas')
+  const kind = selected?.kind ?? null
+  root.classList.toggle('notas--backlog', kind === 'backlog')
+  root.classList.toggle('notas--wide', kind === 'storage' || kind === 'space-settings' || kind === 'atlassian')
   const rail = railSignature()
   if (rail !== railPainted) {
     railPainted = rail
     renderRail(railHost, railState(), {
       onQuery: runQuery,
+      onScope: setScope,
       onToggle: toggleNode,
-      onSelectPage: selectPage,
-      onSelectEntry: openEntryDocument,
+      onSelectPage: (pageId) => selectPage(pageId),
+      onSelectResult: selectResult,
       onSelectBacklog: selectBacklog,
+      onSelectMeetings: selectMeetings,
+      onSelectStorage: selectStorage,
+      onSelectSettings: selectSettings,
+      onSwitcher: showSwitcher,
+      onSpace: (slug) => {
+        switchSpace(slug)
+        setRail(true)
+      },
       onCollapse: () => setRail(false),
+      onExpand: () => setRail(true),
     })
   }
 
-  if (selected?.kind === 'backlog') {
+  if (kind === 'backlog') {
     const view = backlogSignature()
     if (view !== readerPainted) {
       readerPainted = view
       renderBacklog(readerHost, backlogState(), {
-        onTab: (tab) => {
-          backlogTab = tab
-          chooseBacklogItem(null)
-        },
-        onProject: (project) => {
-          backlogProject = project
-          chooseBacklogItem(null)
-        },
-        onQuery: queryBacklog,
-        onSelect: chooseBacklogItem,
-        onDraft: (text) => {
-          backlogDraft = text
-        },
-        onResolve: (id) => {
-          setBacklogStatus(id, 'resolved', backlogDraft)
+        onResolve: (id, resolution) => {
+          setBacklogStatus(id, 'resolved', resolution)
         },
         onReopen: (id) => {
           setBacklogStatus(id, 'open', null)
         },
-        onToPending: setBacklogPending,
+        onConvert: setBacklogKind,
+        onCreate: createBacklogItem,
         onOpenPage: selectPage,
         onCopy: copyBacklogText,
         onExpandRail: () => setRail(true),
       })
     }
-  }
-
-  const reader = readerSignature()
-  if (selected?.kind !== 'backlog' && reader !== readerPainted) {
-    readerPainted = reader
-    renderReader(readerHost, readerState(), {
-      onPrev: () => step(-1),
-      onNext: () => step(1),
-      onCopy: copy,
-      onOpenDocument: (relPath) => {
-        void openDocument(relPath).catch(showFailure)
-      },
-      onOpenExternal: (url) => {
-        void openExternal(url).catch(showFailure)
-      },
-      onHit: moveHit,
-      onCrumb: selectPage,
-      onExpandRail: () => setRail(true),
-      onExpandAside: () => setAside(true),
-      onMeetingTab: setMeetingTab,
-      onSeek: seekMeeting,
-    })
-    afterReaderPaint()
+  } else if (kind === 'meetings' || kind === 'storage' || kind === 'space-settings' || kind === 'atlassian') {
+    const view = viewSignature(kind)
+    if (view !== readerPainted) {
+      readerPainted = view
+      paintView(kind)
+    }
+  } else {
+    const reader = readerSignature()
+    if (reader !== readerPainted) {
+      readerPainted = reader
+      renderReader(readerHost, readerState(), {
+        onPrev: () => step(-1),
+        onNext: () => step(1),
+        onCopy: copy,
+        onOpenDocument: (relPath) => {
+          void openDocument(relPath).catch(showFailure)
+        },
+        onOpenExternal: (url) => {
+          void openExternal(url).catch(showFailure)
+        },
+        onHit: moveHit,
+        onCrumb: selectPage,
+        onExpandRail: () => setRail(true),
+        onExpandAside: () => setAside(true),
+        onMeetingTab: setMeetingTab,
+        onSeek: seekMeeting,
+        onExport: exportCurrent,
+        onCompress: compressCurrent,
+        onStripVideo: stripCurrent,
+      })
+      afterReaderPaint()
+    }
   }
 
   const aside = asideSignature()
@@ -352,8 +489,57 @@ function paint(): void {
       onOpenFolder: (dir) => {
         void openMeetingFolder(dir).catch(showFailure)
       },
+      onHit: (index) => {
+        moveHit(index - hit)
+      },
     })
   }
+}
+
+function paintView(kind: 'meetings' | 'storage' | 'space-settings' | 'atlassian'): void {
+  const space = currentSpace()
+  if (kind === 'meetings') {
+    renderMeetings(readerHost, meetingsContext())
+    return
+  }
+  if (kind === 'storage') {
+    renderStorage(readerHost, {
+      spaces,
+      activeSpace: space,
+      railOpen,
+      onExpandRail: () => setRail(true),
+      onOpenPage: (pageId) => selectPage(pageId, true),
+      beforeReplace: releaseIfShowing,
+    })
+    return
+  }
+  if (kind === 'atlassian') {
+    renderAtlassian(readerHost, {
+      railOpen,
+      onExpandRail: () => setRail(true),
+      onBack: selectSettings,
+    })
+    return
+  }
+  if (space === null) {
+    readerHost.replaceChildren()
+    return
+  }
+  renderSpaceSettings(readerHost, {
+    space,
+    clientName: space.projectId === null ? null : (clients.get(space.projectId) ?? null),
+    jiraKey: space.projectId === null ? null : (jiraKeys.get(space.projectId) ?? null),
+    railOpen,
+    onExpandRail: () => setRail(true),
+    onManageConnections: selectAtlassian,
+    onSaved: () => {
+      void loadTree()
+    },
+  })
+}
+
+function releaseIfShowing(meetingId: string): void {
+  if (meetingLoad?.state === 'ready' && meetingLoad.view.id === meetingId) releaseMedia()
 }
 
 function setMeetingTab(tab: MeetingTab): void {
@@ -367,9 +553,8 @@ function seekMeeting(seconds: number): void {
   const context = meetingContext()
   if (context === null || context.load.state !== 'ready') return
   const view = context.load.view
-  const target: MeetingTab = isRemote(context.info) ? 'meeting' : 'transcript'
-  if (meetingTab !== target) {
-    meetingTab = target
+  if (meetingTab !== 'meeting') {
+    meetingTab = 'meeting'
     paint()
   }
   seekTo(view, seconds)
@@ -410,13 +595,25 @@ function toggleLog(): void {
 
 function afterReaderPaint(): void {
   const marks = [...readerHost.querySelectorAll<HTMLElement>('mark.hit')]
-  if (marks.length !== hitCount) {
+  const labels = marks.map(hitLabel)
+  if (marks.length !== hitCount || labels.join('|') !== hitLabels.join('|')) {
+    if (marks.length !== hitCount) hit = 0
     hitCount = marks.length
-    hit = 0
+    hitLabels = labels
     readerPainted = readerSignature()
   }
   highlightHit(marks)
   watchSections()
+}
+
+function hitLabel(mark: HTMLElement): string {
+  const tagged = mark.closest<HTMLElement>('[data-hit-label]')
+  if (tagged !== null) return tagged.dataset['hitLabel'] ?? ''
+  const section = mark.closest<HTMLElement>('.doc-section[data-heading]')
+  if (section !== null) return section.dataset['heading'] ?? ''
+  if (mark.closest('.room-row') !== null) return 'Transcripción'
+  if (mark.closest('.meeting-article') !== null) return 'Minuta'
+  return 'Introducción'
 }
 
 function highlightHit(marks: HTMLElement[]): void {
@@ -432,7 +629,9 @@ function moveHit(delta: number): void {
   hit = (hit + delta + hitCount) % hitCount
   highlightHit([...readerHost.querySelectorAll<HTMLElement>('mark.hit')])
   const label = readerHost.querySelector<HTMLElement>('.hit-count')
-  if (label) label.textContent = `${hit + 1} / ${hitCount}`
+  if (label) label.textContent = `«${query.trim()}» ${hit + 1} de ${hitCount}`
+  readerPainted = readerSignature()
+  paint()
 }
 
 function scrollToHeading(anchor: string): void {
@@ -476,6 +675,18 @@ function allPages(): PageNode[] {
   return flat
 }
 
+function spacePages(space: Space | null): PageNode[] {
+  const flat: PageNode[] = []
+  const walk = (list: PageNode[]): void => {
+    for (const page of list) {
+      flat.push(page)
+      walk(page.children ?? [])
+    }
+  }
+  walk(space?.pages ?? [])
+  return flat
+}
+
 export function currentSpace(): Space | null {
   return spaces.find((space) => space.projectSlug === activeSpace) ?? null
 }
@@ -488,6 +699,21 @@ export function meetingEntryIds(): Set<number> {
   return ids
 }
 
+function spaceOfPage(pageId: number): Space | null {
+  return spaces.find((space) => spacePages(space).some((page) => page.pageId === pageId)) ?? null
+}
+
+function crumbOf(page: PageNode): string {
+  const byId = new Map(allPages().map((node) => [node.pageId, node]))
+  const trail: string[] = []
+  let cursor = page.parentId === null ? undefined : byId.get(page.parentId)
+  while (cursor !== undefined) {
+    trail.unshift(cursor.title)
+    cursor = cursor.parentId === null ? undefined : byId.get(cursor.parentId)
+  }
+  return trail.length === 0 ? 'Raíz del espacio' : trail.join(' / ')
+}
+
 function flatOrder(): number[] {
   const order: number[] = []
   const walk = (list: PageNode[]): void => {
@@ -496,10 +722,7 @@ function flatOrder(): number[] {
       if (expanded.has(pageKey(page))) walk(page.children ?? [])
     }
   }
-  for (const space of spaces) {
-    if (!expanded.has(spaceKey(space))) continue
-    walk(space.pages)
-  }
+  walk(currentSpace()?.pages ?? [])
   return order
 }
 
@@ -511,10 +734,89 @@ function step(delta: number): void {
   if (next !== undefined && next !== selected?.id) selectPage(next)
 }
 
-function selectBacklog(): void {
-  selected = { kind: 'backlog', id: 0 }
+function leavePage(): void {
+  stopPlayback()
   opened = null
   active = null
+  failure = null
+}
+
+function selectMeetings(): void {
+  selected = { kind: 'meetings', id: 0 }
+  leavePage()
+  paint()
+  void loadRecords()
+}
+
+function selectStorage(): void {
+  selected = { kind: 'storage', id: 0 }
+  leavePage()
+  paint()
+}
+
+function selectSettings(): void {
+  selected = { kind: 'space-settings', id: 0 }
+  leavePage()
+  paint()
+}
+
+function selectAtlassian(): void {
+  selected = { kind: 'atlassian', id: 0 }
+  leavePage()
+  paint()
+}
+
+async function loadRecords(): Promise<void> {
+  try {
+    records = await recapList()
+  } catch {
+    records = records ?? []
+  }
+  paint()
+}
+
+function refreshStorageTotal(): void {
+  void storageTotal()
+    .then((bytes) => {
+      storageBytes = bytes
+      paint()
+    })
+    .catch(() => undefined)
+}
+
+function switchSpace(slug: string, keepSelection = false): void {
+  const space = spaces.find((candidate) => candidate.projectSlug === slug)
+  if (space === undefined) return
+  const changed = slug !== activeSpace
+  activeSpace = slug
+  rememberText(SPACE_KEY, slug)
+  if (!changed || keepSelection) {
+    paint()
+    return
+  }
+  if (query.trim().length > 0 && scope === 'space') runQuery(query)
+  if (selected?.kind === 'page' || selected === null) {
+    selected = null
+    leavePage()
+  }
+  readerPainted = ''
+  paint()
+}
+
+function showSwitcher(anchor: HTMLElement): void {
+  toggleSwitcher({ anchor, spaces, active: activeSpace, onPick: (slug) => switchSpace(slug) })
+}
+
+function setScope(next: SearchScope): void {
+  if (next === scope) return
+  scope = next
+  rememberText(SCOPE_KEY, next)
+  runQuery(query)
+}
+
+function selectBacklog(): void {
+  selected = { kind: 'backlog', id: 0 }
+  leavePage()
   paint()
   void loadBacklog()
 }
@@ -531,33 +833,15 @@ async function loadBacklog(): Promise<void> {
 }
 
 function openBacklogItem(id: number): void {
-  const item = (backlog ?? []).find((candidate) => candidate.id === id)
-  if (item) {
-    backlogTab = tabOf(item)
-    backlogProject = projectOf(item)
-    backlogQuery = ''
-  }
-  backlogSelected = id
-  backlogDraft = ''
+  focusBacklogItem(id)
+  readerPainted = ''
   selectBacklog()
 }
 
-function chooseBacklogItem(id: number | null): void {
-  if (id !== backlogSelected) backlogDraft = ''
-  backlogSelected = id
-  paint()
-}
-
-function queryBacklog(value: string): void {
-  backlogQuery = value
-  const exact = findByKey(backlog, value)
-  if (exact) {
-    backlogTab = tabOf(exact)
-    backlogProject = ALL_PROJECTS
-    chooseBacklogItem(exact.id)
-    return
-  }
-  paint()
+async function createBacklogItem(draft: BacklogDraft): Promise<void> {
+  const project = currentSpace()?.projectSlug ?? null
+  await backlogAdd(draft.kind, draft.title, draft.body.length > 0 ? draft.body : null, draft.pageId, project)
+  await loadBacklog()
 }
 
 function copyBacklogText(text: string): void {
@@ -578,8 +862,6 @@ function copyBacklogText(text: string): void {
 }
 
 function afterBacklogChange(id: number, run: () => Promise<{ data: BacklogItem }>): void {
-  const before = visibleItems(backlogState())
-  const at = before.findIndex((item) => item.id === id)
   backlogBusy.add(id)
   paint()
   void (async () => {
@@ -587,16 +869,10 @@ function afterBacklogChange(id: number, run: () => Promise<{ data: BacklogItem }
       const payload = await run()
       backlog = (backlog ?? []).map((item) => (item.id === id ? { ...item, ...payload.data } : item))
       backlogFailure = null
-      backlogDraft = ''
     } catch (error) {
       backlogFailure = describeProblem(error)
     }
     backlogBusy.delete(id)
-    const after = visibleItems(backlogState())
-    if (!after.some((item) => item.id === id)) {
-      const successor = before.slice(at + 1).find((item) => after.some((other) => other.id === item.id))
-      backlogSelected = successor?.id ?? after.at(-1)?.id ?? null
-    }
     paint()
   })()
 }
@@ -605,25 +881,30 @@ function setBacklogStatus(id: number, status: BacklogStatus, resolution: string 
   afterBacklogChange(id, () => backlogSetStatus(id, status, resolution))
 }
 
-function setBacklogPending(id: number): void {
-  afterBacklogChange(id, () => backlogSetKind(id, 'pending'))
+function setBacklogKind(id: number, kind: BacklogKind): void {
+  afterBacklogChange(id, () => backlogSetKind(id, kind))
 }
 
-function selectPage(pageId: number): void {
+function selectPage(pageId: number, keepTab = false): void {
+  const owner = spaceOfPage(pageId)
+  if (owner !== null && owner.projectSlug !== activeSpace) switchSpace(owner.projectSlug, true)
+  if (!keepTab && meetingPageId !== pageId) meetingTab = 'document'
   selected = { kind: 'page', id: pageId }
   hit = 0
   active = null
   revealAncestors(pageId)
   paint()
-  void loadPage(pageId)
+  void loadPage(pageId, keepTab)
+}
+
+function selectResult(result: PageResult): void {
+  selectPage(result.pageId, result.page === 0 && result.entries === 0 && result.transcript > 0)
+  if (result.page === 0 && result.entries === 0 && result.transcript > 0) meetingTab = 'meeting'
 }
 
 function revealAncestors(pageId: number): void {
   const byId = new Map(allPages().map((page) => [page.pageId, page]))
   let cursor = byId.get(pageId)
-  const space = spaces.find((candidate) => candidate.projectId === cursor?.projectId)
-  if (space) expanded.add(spaceKey(space))
-
   while (cursor?.parentId != null) {
     const parent = byId.get(cursor.parentId)
     if (!parent) break
@@ -632,7 +913,7 @@ function revealAncestors(pageId: number): void {
   }
 }
 
-async function loadPage(pageId: number): Promise<void> {
+async function loadPage(pageId: number, keepTab = false): Promise<void> {
   loadingDoc = true
   failure = null
   paint()
@@ -644,11 +925,12 @@ async function loadPage(pageId: number): Promise<void> {
     loadingDoc = false
     const info = latestMeeting(opened.meetings)
     if (meetingPageId !== pageId) {
-      meetingTab = 'document'
+      if (!keepTab) meetingTab = 'document'
       stopPlayback()
     }
     if (info === null) {
       meetingLoad = null
+      meetingTab = 'document'
       meetingPageId = pageId
     } else if (meetingPageId !== pageId || meetingLoad?.state !== 'ready') {
       void loadMeeting(pageId, info.entryId)
@@ -660,6 +942,67 @@ async function loadPage(pageId: number): Promise<void> {
     failure = describeProblem(error)
   }
   paint()
+}
+
+function reloadMeeting(): void {
+  if (opened === null) return
+  const info = latestMeeting(opened.meetings)
+  if (info === null) return
+  meetingPageId = opened.pageId
+  void loadMeeting(opened.pageId, info.entryId)
+}
+
+function currentRecord(): Promise<MeetingRecord | null> {
+  const known = readyView()
+  if (known !== null) return Promise.resolve(known)
+  return recapList()
+    .then((list) => {
+      records = list
+      return readyView()
+    })
+    .catch((error: unknown) => {
+      showFailure(error)
+      return null
+    })
+}
+
+function compressCurrent(): void {
+  if (meetingLoad?.state !== 'ready') return
+  const view = meetingLoad.view
+  void currentRecord().then((record) => {
+    if (record === null) return
+    openCompressDialog(record, { frameSrc: currentFrameSrc(view), beforeReplace: releaseMedia })
+  })
+}
+
+function stripCurrent(): void {
+  if (meetingLoad?.state !== 'ready') return
+  void currentRecord().then((record) => {
+    if (record === null) return
+    openStripDialog(record, {
+      beforeReplace: releaseMedia,
+      onDone: () => {
+        void loadRecords()
+        reloadMeeting()
+        refreshStorageTotal()
+      },
+    })
+  })
+}
+
+function exportCurrent(): void {
+  if (opened === null) return
+  const node = allPages().find((page) => page.pageId === opened?.pageId)
+  const space = spaceOfPage(opened.pageId) ?? currentSpace()
+  if (node === undefined || space === null) return
+  openExportDialog({
+    root: node,
+    space,
+    client: space.projectId === null ? null : (clients.get(space.projectId) ?? null),
+    onOpenDocument: (relPath) => {
+      void openDocument(relPath).catch(showFailure)
+    },
+  })
 }
 
 function openEntryDocument(entryId: number): void {
@@ -696,6 +1039,7 @@ function runQuery(value: string): void {
 
   if (value.trim().length === 0) {
     results = null
+    hitLabels = []
     paint()
     return
   }
@@ -705,15 +1049,24 @@ function runQuery(value: string): void {
 
   window.setTimeout(() => {
     if (searchToken !== token) return
-    void search(value, token)
+    void search(value.trim(), token)
   }, 180)
 }
 
 async function search(value: string, token: number): Promise<void> {
+  const space = scope === 'space' ? currentSpace() : null
   try {
-    const payload = await notesSearch(value, null)
+    const payload = await notesSearchPages(value, space?.projectSlug ?? null)
     if (searchToken !== token) return
-    results = payload.data
+    const pages = space === null ? allPages() : spacePages(space)
+    const allowed = new Set(pages.map((page) => page.pageId))
+    results = payload.data.map(fromPageHit).filter((result) => space === null || allowed.has(result.pageId))
+    paint()
+    const entryIds = pages.flatMap((page) => (page.meetings ?? []).map((meeting) => meeting.entryId))
+    if (entryIds.length === 0) return
+    const transcripts = await searchTranscripts(value, entryIds).catch(() => [])
+    if (searchToken !== token || results === null) return
+    results = withTranscripts(results, transcripts, pages, crumbOf)
   } catch (error) {
     if (searchToken !== token) return
     results = []
@@ -731,22 +1084,38 @@ function showFailure(error: unknown): void {
   paint()
 }
 
+function chooseDefaultSpace(): void {
+  if (spaces.some((space) => space.projectSlug === activeSpace)) return
+  const first = withPages(spaces)[0] ?? spaces[0]
+  activeSpace = first?.projectSlug ?? null
+}
+
 async function loadTree(): Promise<void> {
   loadingTree = true
   try {
     const payload = await notesTree()
     spaces = payload.data.spaces ?? []
     pageCount = spaces.reduce((total, space) => total + space.pageCount, 0)
-    if (expanded.size === 0) {
-      const first = spaces.find((space) => space.pageCount > 0)
-      if (first) expanded.add(spaceKey(first))
-    }
+    chooseDefaultSpace()
     failure = null
   } catch (error) {
     failure = describeProblem(error)
   }
   loadingTree = false
   paint()
+}
+
+async function loadClients(): Promise<void> {
+  try {
+    const list = await projects()
+    clients = new Map(list.filter((project) => project.clientName !== null).map((project) => [project.id, project.clientName as string]))
+    jiraKeys = new Map(
+      list.filter((project) => project.jiraProjectKey !== null).map((project) => [project.id, project.jiraProjectKey as string]),
+    )
+    paint()
+  } catch {
+    return
+  }
 }
 
 function focusOnPage(pageId: number): void {
@@ -756,8 +1125,29 @@ function focusOnPage(pageId: number): void {
 function keys(event: KeyboardEvent): void {
   const target = event.target as HTMLElement | null
   const typing = target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA'
+  const command = event.metaKey || event.ctrlKey
 
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+  if (command && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    if (!railOpen) setRail(true)
+    const anchor = railHost.querySelector<HTMLElement>('#space-switch')
+    if (anchor !== null) showSwitcher(anchor)
+    return
+  }
+
+  if (command && /^[1-9]$/.test(event.key)) {
+    const space = withPages(spaces)[Number(event.key) - 1]
+    if (space !== undefined) {
+      event.preventDefault()
+      closeSwitcher()
+      switchSpace(space.projectSlug)
+    }
+    return
+  }
+
+  if (isSwitcherOpen()) return
+
+  if (command && event.key.toLowerCase() === 'f') {
     event.preventDefault()
     if (!railOpen) setRail(true)
     const input = railHost.querySelector<HTMLInputElement>('#rail-query')
@@ -766,37 +1156,38 @@ function keys(event: KeyboardEvent): void {
     return
   }
 
-  if ((event.metaKey || event.ctrlKey) && (event.key === '=' || event.key === '+')) {
+  if (command && (event.key === '=' || event.key === '+')) {
     event.preventDefault()
     applyScale(scale + SCALE_STEP)
     return
   }
 
-  if ((event.metaKey || event.ctrlKey) && (event.key === '-' || event.key === '_')) {
+  if (command && (event.key === '-' || event.key === '_')) {
     event.preventDefault()
     applyScale(scale - SCALE_STEP)
     return
   }
 
-  if ((event.metaKey || event.ctrlKey) && event.key === '0') {
+  if (command && event.key === '0') {
     event.preventDefault()
     applyScale(1)
     return
   }
 
-  if ((event.metaKey || event.ctrlKey) && (event.key === ']' || event.key === '[')) {
+  if (command && (event.key === ']' || event.key === '[')) {
     event.preventDefault()
     stepProse(event.key === ']' ? 1 : -1)
     return
   }
 
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'g') {
+  if (command && event.key.toLowerCase() === 'g') {
     event.preventDefault()
     moveHit(event.shiftKey ? -1 : 1)
     return
   }
 
   if (event.key === 'Escape') {
+    if (document.querySelector('.export-overlay, .md-overlay') !== null) return
     if (query.trim().length > 0) {
       runQuery('')
       return
@@ -806,6 +1197,8 @@ function keys(event: KeyboardEvent): void {
   }
 
   if (typing) return
+  if (selected?.kind !== 'page') return
+  if (target?.closest('.room-list, .mp-track') != null) return
 
   if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
     event.preventDefault()
@@ -827,8 +1220,8 @@ function attachSashes(): void {
     variable: '--rail-open',
     side: 'left',
     storageKey: 'bita.notes.rail-width',
-    initial: 220,
-    min: 160,
+    initial: 240,
+    min: 180,
     max: 520,
     readerMin: 420,
     otherWidth: () => asideHost.getBoundingClientRect().width,
@@ -855,15 +1248,31 @@ async function start(): Promise<void> {
   onDocsChanged(() => {
     void loadTree()
     void loadBacklog()
-    if (selected?.kind === 'page') void loadPage(selected.id)
+    if (selected?.kind === 'page') void loadPage(selected.id, true)
+    if (selected?.kind === 'meetings') void loadRecords()
+  })
+  onSyncFinished(() => {
+    void loadTree()
   })
   onNotesFocus((pageId) => {
     focusOnPage(pageId)
+  })
+  onMeetingMediaChanged((change) => {
+    void loadRecords()
+    refreshStorageTotal()
+    if (change.ok && meetingLoad?.state === 'ready' && meetingLoad.view.id === change.id) reloadMeeting()
+    else paint()
+  })
+  onMediaJobs(() => {
+    readerPainted = ''
+    paint()
   })
 
   paint()
   await loadTree()
   void loadBacklog()
+  void loadClients()
+  refreshStorageTotal()
 
   const focus = await notesTakeFocus()
   if (focus !== null) focusOnPage(focus)

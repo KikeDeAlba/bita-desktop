@@ -1,15 +1,16 @@
-import type { PageDocument, PageIssue, Problem } from '../bita.ts'
+import type { PageDocument, PageEntryRow, PageIssue, Problem } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import { renderMarkdown } from './markdown.ts'
 import { resetPage } from './mermaid.ts'
 import { anchorOf } from './sections.ts'
 import { proseControl } from './prose.ts'
+import './reader.css'
 import { assetsRelDirOf } from './drawio.ts'
+import { foldForSearch } from './markdown.ts'
 import {
   meetingChip,
-  renderMeeting,
   renderMinutes,
-  renderTranscript,
+  renderRoom,
   tabBar,
   type MeetingContext,
   type MeetingTab,
@@ -27,6 +28,13 @@ export interface ReaderHandlers {
   onExpandAside: () => void
   onMeetingTab: (tab: MeetingTab) => void
   onSeek: (seconds: number) => void
+  onExport: () => void
+  onCompress: () => void
+  onStripVideo: () => void
+}
+
+export interface VideoActions {
+  compressing: boolean
 }
 
 export interface ReaderState {
@@ -41,6 +49,7 @@ export interface ReaderState {
   railOpen: boolean
   asideOpen: boolean
   meeting: MeetingContext | null
+  video: VideoActions | null
 }
 
 export function renderReader(host: HTMLElement, state: ReaderState, handlers: ReaderHandlers): void {
@@ -71,12 +80,9 @@ export function renderReader(host: HTMLElement, state: ReaderState, handlers: Re
     onLink: handlers.onOpenExternal,
     onCopy: handlers.onCopy,
   }
+  const query = state.query.trim()
   const content =
-    meeting.tab === 'minutes'
-      ? renderMinutes(meeting, meetingHandlers)
-      : meeting.tab === 'transcript'
-        ? renderTranscript(meeting, meetingHandlers)
-        : renderMeeting(meeting)
+    meeting.tab === 'minutes' ? renderMinutes(meeting, meetingHandlers, query) : renderRoom(meeting, meetingHandlers, query)
   host.replaceChildren(bar(state, handlers), header(state, handlers), content)
 }
 
@@ -113,13 +119,26 @@ function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
 
   if (state.query.trim().length > 0 && state.hitCount > 0) {
     const nav = element('span', 'hit-nav')
-    nav.append(element('span', 'hit-count', `${state.hit + 1} / ${state.hitCount}`))
+    nav.append(element('span', 'hit-count', `«${state.query.trim()}» ${state.hit + 1} de ${state.hitCount}`))
     nav.append(iconAction('up', 'Coincidencia anterior', () => handlers.onHit(-1)))
     nav.append(iconAction('down', 'Coincidencia siguiente', () => handlers.onHit(1)))
+    nav.append(element('span', 'kbd hit-key', '⌘G'))
     row.append(nav)
   }
 
-  if (page !== null) row.append(proseControl())
+  if (page !== null && state.video !== null) {
+    if (state.video.compressing) {
+      const busy = textAction('compress', 'Comprimiendo…', () => undefined)
+      busy.disabled = true
+      busy.classList.add('bar-action--busy')
+      row.append(busy)
+    } else {
+      row.append(textAction('compress', 'Comprimir video', handlers.onCompress))
+      row.append(textAction('trash', 'Borrar video', handlers.onStripVideo))
+    }
+  }
+  if (page !== null) row.append(textAction('download', 'Exportar PDF', handlers.onExport))
+  if (page !== null && (state.meeting === null || state.meeting.tab === 'document')) row.append(proseControl())
 
   row.append(iconAction('prev', 'Página anterior', handlers.onPrev, !state.canPrev))
   row.append(iconAction('next', 'Página siguiente', handlers.onNext, !state.canNext))
@@ -128,6 +147,15 @@ function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
     row.append(iconAction('panelRight', 'Desplegar el panel', handlers.onExpandAside))
   }
   return row
+}
+
+function textAction(glyph: 'compress' | 'trash' | 'download', label: string, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'bar-action'
+  button.append(icon(glyph, 13), element('span', '', label))
+  button.addEventListener('click', onClick)
+  return button
 }
 
 function iconAction(
@@ -148,6 +176,16 @@ function iconAction(
 
 function header(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
   const page = state.page as PageDocument
+  if (state.meeting !== null && state.meeting.tab !== 'document') {
+    const compact = element('div', 'doc-header doc-header--meeting')
+    const line = element('div', 'doc-title-row')
+    const heading = element('h1', 'doc-title', page.title)
+    heading.tabIndex = -1
+    line.append(heading, meetingChip(state.meeting.info, state.meeting.load))
+    compact.append(line, tabBar(state.meeting, handlers.onMeetingTab))
+    return compact
+  }
+
   const head = element('div', 'doc-header')
 
   const title = element('h1', 'doc-title', page.title)
@@ -167,8 +205,8 @@ function header(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
 
   if (page.issues.length > 0) head.append(tasks(page.issues, handlers))
   if (state.meeting !== null) {
-    head.append(meetingChip(state.meeting.info))
-    head.append(tabBar(state.meeting.info, state.meeting.tab, handlers.onMeetingTab))
+    head.append(meetingChip(state.meeting.info, state.meeting.load))
+    head.append(tabBar(state.meeting, handlers.onMeetingTab))
   }
   return head
 }
@@ -231,8 +269,28 @@ function body(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
     article.append(block)
   }
 
+  const matching = matchingEntries(page.entries, state.query)
+  if (matching.length > 0) {
+    const block = element('section', 'doc-section doc-entries')
+    block.append(element('h2', 'doc-section-title', 'Desde las entradas del cronómetro'))
+    for (const entry of matching) {
+      const card = element('div', 'doc-entry')
+      card.dataset['hitLabel'] = `Entrada ${shortDay(entry.localDay)}`
+      card.append(element('span', 'kbd', `${shortDay(entry.localDay)} · ${entry.durationHuman}`))
+      card.append(render(entry.summary.trim().length > 0 ? entry.summary : entry.title, state, handlers))
+      block.append(card)
+    }
+    article.append(block)
+  }
+
   wrap.append(article)
   return wrap
+}
+
+function matchingEntries(entries: PageEntryRow[], query: string): PageEntryRow[] {
+  const needle = foldForSearch(query.trim())
+  if (needle.length === 0) return []
+  return entries.filter((entry) => foldForSearch(`${entry.title}\n${entry.summary}`).includes(needle))
 }
 
 function render(markdown: string, state: ReaderState, handlers: ReaderHandlers, className?: string): Node {
@@ -369,6 +427,12 @@ function categoryColor(category: PageIssue['statusCategory']): string {
   if (category === 'indeterminate') return 'var(--estimate)'
   if (category === 'new') return 'var(--blue)'
   return 'var(--elev-strong)'
+}
+
+function shortDay(localDay: string): string {
+  const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+  const [, month, day] = localDay.split('-')
+  return `${(day ?? '').padStart(2, '0')} ${months[Number(month) - 1] ?? ''}`.trim()
 }
 
 function spanish(localDay: string): string {

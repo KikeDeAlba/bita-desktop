@@ -1,47 +1,45 @@
-import type { PageNode, SearchHit, Space } from '../bita.ts'
+import type { PageNode, Space } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import { projectColor } from '../tabs.ts'
-import { durationLabel, isRemote, latestMeeting, meetingShortDay } from './meeting.ts'
+import { isRemote, latestMeeting } from './meeting.ts'
+import type { PageResult, SearchScope } from './search.ts'
+import { withPages } from './switcher.ts'
+import './spaces.css'
 
-const RECENT_MEETINGS = 5
+export type SelectionKind = 'page' | 'entry' | 'backlog' | 'meetings' | 'storage' | 'space-settings' | 'atlassian'
 
-export type Selection = { kind: 'page' | 'entry' | 'backlog'; id: number } | null
+export type Selection = { kind: SelectionKind; id: number } | null
 
 export interface RailHandlers {
   onQuery: (value: string) => void
+  onScope: (scope: SearchScope) => void
   onToggle: (key: string) => void
   onSelectPage: (pageId: number) => void
-  onSelectEntry: (entryId: number) => void
+  onSelectResult: (result: PageResult) => void
   onSelectBacklog: () => void
+  onSelectMeetings: () => void
+  onSelectStorage: () => void
+  onSelectSettings: () => void
+  onSwitcher: (anchor: HTMLElement) => void
+  onSpace: (slug: string) => void
   onCollapse: () => void
+  onExpand: () => void
 }
 
 export interface RailState {
   spaces: Space[]
+  active: Space | null
+  client: string | null
   expanded: Set<string>
   selected: Selection
   query: string
-  results: SearchHit[] | null
-  pageCount: number
+  scope: SearchScope
+  results: PageResult[] | null
   loading: boolean
   open: boolean
   backlogOpen: number | null
-}
-
-function backlogRow(state: RailState, handlers: RailHandlers): HTMLElement {
-  const on = state.selected?.kind === 'backlog'
-  const row = document.createElement('button')
-  row.type = 'button'
-  row.className = on ? 'backlog-row backlog-row--on' : 'backlog-row'
-  row.setAttribute('aria-current', String(on))
-  const glyph = element('span', 'backlog-row-icon')
-  glyph.append(icon('inbox', 13))
-  row.append(glyph, element('span', 'backlog-row-name', 'Pendientes y hallazgos'))
-  if (state.backlogOpen !== null && state.backlogOpen > 0) {
-    row.append(element('span', 'project-count', String(state.backlogOpen)))
-  }
-  row.addEventListener('click', handlers.onSelectBacklog)
-  return row
+  meetingCount: number
+  storageBytes: number | null
 }
 
 export function spaceKey(space: Space): string {
@@ -50,6 +48,13 @@ export function spaceKey(space: Space): string {
 
 export function pageKey(page: PageNode): string {
   return `page:${page.pageId}`
+}
+
+export function formatSize(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${bytes} B`
 }
 
 export function renderRail(host: HTMLElement, state: RailState, handlers: RailHandlers): void {
@@ -61,74 +66,40 @@ export function renderRail(host: HTMLElement, state: RailState, handlers: RailHa
   }
 
   const standing = host.querySelector<HTMLInputElement>('#rail-query')
-  const body = standing === null ? freshChrome(host, state, handlers) : keepChrome(host, standing, state)
+  const parts = standing === null ? freshChrome(host, state, handlers) : keepChrome(host, standing, state)
+
+  parts.top.replaceChildren(switcherButton(state, handlers))
+  parts.scope.replaceChildren(...scopeToggle(state, handlers))
+  parts.foot.replaceChildren(...footRows(state, handlers))
 
   if (state.query.trim().length > 0) {
-    renderResults(body, state, handlers)
+    renderResults(parts.body, state, handlers)
     return
   }
-  body.append(backlogRow(state, handlers))
-  const meetings = meetingsSection(state, handlers)
-  if (meetings !== null) body.append(meetings)
-  renderTree(body, state, handlers)
+  parts.body.append(fixedRow('inbox', 'Pendientes y hallazgos', state.backlogOpen, state.selected?.kind === 'backlog', handlers.onSelectBacklog))
+  parts.body.append(fixedRow('calendar', 'Reuniones', state.meetingCount, state.selected?.kind === 'meetings', handlers.onSelectMeetings))
+  renderTree(parts.body, state, handlers)
 }
 
-function meetingPages(spaces: Space[]): PageNode[] {
-  const found: PageNode[] = []
-  const walk = (pages: PageNode[]): void => {
-    for (const page of pages) {
-      if (latestMeeting(page.meetings) !== null) found.push(page)
-      walk(page.children ?? [])
-    }
-  }
-  for (const space of spaces) walk(space.pages)
-  return found.sort((left, right) =>
-    (latestMeeting(right.meetings)?.startedAt ?? '').localeCompare(latestMeeting(left.meetings)?.startedAt ?? ''),
-  )
+interface Chrome {
+  top: HTMLElement
+  scope: HTMLElement
+  body: HTMLElement
+  foot: HTMLElement
 }
 
-function meetingsSection(state: RailState, handlers: RailHandlers): HTMLElement | null {
-  const pages = meetingPages(state.spaces)
-  if (pages.length === 0) return null
-  const section = element('div', 'rail-meetings')
-  const head = element('div', 'rail-meetings-head')
-  head.append(element('span', 'rail-meetings-title', 'Reuniones'), element('span', 'project-count', String(pages.length)))
-  section.append(head)
-  for (const page of pages.slice(0, RECENT_MEETINGS)) {
-    const meeting = latestMeeting(page.meetings)
-    if (meeting === null) continue
-    const on = state.selected?.kind === 'page' && state.selected.id === page.pageId
-    const row = document.createElement('button')
-    row.type = 'button'
-    row.className = on ? 'meeting-row meeting-row--on' : 'meeting-row'
-    row.setAttribute('aria-current', String(on))
-    const lines = element('span', 'meeting-row-lines')
-    lines.append(
-      element('span', 'meeting-row-title', page.title),
-      element(
-        'span',
-        'meeting-row-meta',
-        `${page.projectName ?? 'Sin proyecto'} · ${isRemote(meeting) ? 'remota' : 'presencial'} · ${durationLabel(meeting.durationSeconds)}`,
-      ),
-    )
-    row.append(element('span', 'meeting-row-day', meetingShortDay(meeting.startedAt)), lines)
-    row.addEventListener('click', () => handlers.onSelectPage(page.pageId))
-    section.append(row)
-  }
-  return section
-}
-
-function freshChrome(host: HTMLElement, state: RailState, handlers: RailHandlers): HTMLElement {
+function freshChrome(host: HTMLElement, state: RailState, handlers: RailHandlers): Chrome {
   const head = element('div', 'rail-head')
   head.setAttribute('data-tauri-drag-region', '')
-  const wordmark = element('span', 'rail-wordmark', 'documentación')
   const fold = document.createElement('button')
   fold.type = 'button'
   fold.className = 'icon-button'
   fold.setAttribute('aria-label', 'Plegar el árbol')
   fold.append(icon('panelLeft', 13))
   fold.addEventListener('click', handlers.onCollapse)
-  head.append(wordmark, fold)
+  head.append(element('span', 'spacer'), fold)
+
+  const top = element('div', 'rail-top')
 
   const search = element('div', 'rail-search')
   const field = element('label', 'search-field')
@@ -137,64 +108,162 @@ function freshChrome(host: HTMLElement, state: RailState, handlers: RailHandlers
   const input = document.createElement('input')
   input.type = 'search'
   input.id = 'rail-query'
-  input.placeholder = 'Buscar en la documentación…'
   input.autocomplete = 'off'
   input.spellcheck = false
   input.value = state.query
   input.addEventListener('input', () => {
     handlers.onQuery(input.value)
   })
-  const label = element('span', 'visually-hidden', 'Buscar en la documentación')
-  label.setAttribute('for', 'rail-query')
   field.append(glass, input)
-  search.append(label, field)
+  const scope = element('div', 'rail-scope')
+  search.append(field, scope)
 
   const body = element('div', 'rail-body')
   body.setAttribute('role', 'tree')
-  body.setAttribute('aria-label', 'Espacios y páginas')
 
-  host.replaceChildren(head, search, body)
-  return body
+  const foot = element('div', 'rail-foot')
+  host.replaceChildren(head, top, search, body, foot)
+  placeholder(input, state)
+  return { top, scope, body, foot }
 }
 
-function keepChrome(host: HTMLElement, input: HTMLInputElement, state: RailState): HTMLElement {
+function keepChrome(host: HTMLElement, input: HTMLInputElement, state: RailState): Chrome {
   if (input.value !== state.query) input.value = state.query
-
-  const standing = host.querySelector<HTMLElement>('.rail-body')
-  if (standing !== null) {
-    standing.replaceChildren()
-    return standing
+  placeholder(input, state)
+  const body = host.querySelector<HTMLElement>('.rail-body') as HTMLElement
+  body.replaceChildren()
+  return {
+    top: host.querySelector<HTMLElement>('.rail-top') as HTMLElement,
+    scope: host.querySelector<HTMLElement>('.rail-scope') as HTMLElement,
+    body,
+    foot: host.querySelector<HTMLElement>('.rail-foot') as HTMLElement,
   }
+}
 
-  const body = element('div', 'rail-body')
-  body.setAttribute('role', 'tree')
-  body.setAttribute('aria-label', 'Espacios y páginas')
-  host.append(body)
-  return body
+function placeholder(input: HTMLInputElement, state: RailState): void {
+  const name = state.active?.projectName ?? null
+  const text = state.scope === 'space' && name !== null ? `Buscar páginas en ${name}` : 'Buscar en todos los espacios'
+  input.placeholder = text
+  input.setAttribute('aria-label', text)
+  const body = input.closest('.rail')?.querySelector('.rail-body')
+  body?.setAttribute('aria-label', name === null ? 'Páginas' : `Páginas de ${name}`)
+}
+
+function switcherButton(state: RailState, handlers: RailHandlers): HTMLElement {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.className = 'space-switch'
+  button.id = 'space-switch'
+  button.setAttribute('aria-haspopup', 'listbox')
+  button.setAttribute('aria-expanded', 'false')
+  const space = state.active
+  const dot = element('span', 'dot')
+  dot.style.background = space === null ? 'var(--fg-faint)' : projectColor(space.projectId)
+  const lines = element('span', 'space-switch-lines')
+  lines.append(element('span', 'space-switch-name', space?.projectName ?? 'Elige un espacio'))
+  if (space !== null) {
+    const pages = `${space.pageCount} ${space.pageCount === 1 ? 'página' : 'páginas'}`
+    lines.append(element('span', 'space-switch-meta', state.client === null ? pages : `${state.client} · ${pages}`))
+  }
+  button.append(dot, lines, icon('chevronDown', 12))
+  button.title = 'Cambiar de espacio (⌘K)'
+  button.addEventListener('click', () => handlers.onSwitcher(button))
+  return button
+}
+
+function scopeToggle(state: RailState, handlers: RailHandlers): HTMLElement[] {
+  if (state.query.trim().length === 0) return []
+  const group = element('div', 'seg')
+  group.setAttribute('role', 'group')
+  group.setAttribute('aria-label', 'Alcance de la búsqueda')
+  for (const [value, label] of [
+    ['space', 'Este espacio'],
+    ['all', 'Todos'],
+  ] as const) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = label
+    button.setAttribute('aria-pressed', String(state.scope === value))
+    button.addEventListener('click', () => handlers.onScope(value))
+    group.append(button)
+  }
+  return [group]
+}
+
+function fixedRow(
+  glyph: 'inbox' | 'calendar' | 'database' | 'sliders',
+  label: string,
+  count: number | string | null,
+  on: boolean,
+  onClick: () => void,
+): HTMLElement {
+  const row = document.createElement('button')
+  row.type = 'button'
+  row.className = on ? 'fixed-row fixed-row--on' : 'fixed-row'
+  row.setAttribute('aria-current', on ? 'page' : 'false')
+  const mark = element('span', 'fixed-row-icon')
+  mark.append(icon(glyph, 13))
+  row.append(mark, element('span', 'fixed-row-name', label))
+  if (typeof count === 'number' && count > 0) row.append(element('span', 'project-count', String(count)))
+  if (typeof count === 'string') row.append(element('span', 'fixed-row-size', count))
+  row.addEventListener('click', onClick)
+  return row
+}
+
+function footRows(state: RailState, handlers: RailHandlers): HTMLElement[] {
+  return [
+    fixedRow(
+      'database',
+      'Almacenamiento',
+      state.storageBytes === null ? '' : formatSize(state.storageBytes),
+      state.selected?.kind === 'storage',
+      handlers.onSelectStorage,
+    ),
+    fixedRow(
+      'sliders',
+      'Ajustes del espacio',
+      null,
+      state.selected?.kind === 'space-settings' || state.selected?.kind === 'atlassian',
+      handlers.onSelectSettings,
+    ),
+  ]
 }
 
 function collapsedStrip(state: RailState, handlers: RailHandlers): HTMLElement {
   const strip = element('div', 'rail-strip')
   strip.setAttribute('data-tauri-drag-region', '')
 
-  const inbox = document.createElement('button')
-  inbox.type = 'button'
-  inbox.className = 'strip-icon'
-  inbox.setAttribute('aria-label', 'Pendientes y hallazgos')
-  inbox.append(icon('inbox', 14))
-  inbox.addEventListener('click', handlers.onSelectBacklog)
-  strip.append(inbox)
+  const unfold = document.createElement('button')
+  unfold.type = 'button'
+  unfold.className = 'strip-icon'
+  unfold.setAttribute('aria-label', 'Desplegar el árbol')
+  unfold.append(icon('panelLeft', 14))
+  unfold.addEventListener('click', handlers.onExpand)
+  strip.append(unfold)
 
-  for (const space of state.spaces) {
-    if (space.pageCount === 0) continue
+  for (const [glyph, label, run] of [
+    ['inbox', 'Pendientes y hallazgos', handlers.onSelectBacklog],
+    ['calendar', 'Reuniones', handlers.onSelectMeetings],
+  ] as const) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'strip-icon'
+    button.setAttribute('aria-label', label)
+    button.append(icon(glyph, 14))
+    button.addEventListener('click', run)
+    strip.append(button)
+  }
+
+  for (const space of withPages(state.spaces)) {
     const dot = document.createElement('button')
     dot.type = 'button'
-    dot.className = 'strip-dot'
+    dot.className = space.projectSlug === state.active?.projectSlug ? 'strip-dot strip-dot--on' : 'strip-dot'
     dot.setAttribute('aria-label', `Espacio ${space.projectName ?? 'sin proyecto'}`)
+    dot.title = space.projectName ?? 'Sin proyecto'
     const bead = element('span', 'dot')
     bead.style.background = projectColor(space.projectId)
     dot.append(bead)
-    dot.addEventListener('click', handlers.onCollapse)
+    dot.addEventListener('click', () => handlers.onSpace(space.projectSlug))
     strip.append(dot)
   }
 
@@ -202,63 +271,17 @@ function collapsedStrip(state: RailState, handlers: RailHandlers): HTMLElement {
 }
 
 function renderTree(body: HTMLElement, state: RailState, handlers: RailHandlers): void {
-  const withPages = state.spaces.filter((space) => space.pageCount > 0)
-  const withoutPages = state.spaces.filter((space) => space.pageCount === 0)
-
-  if (state.spaces.length === 0) {
+  body.append(element('div', 'rail-label', 'Páginas'))
+  const space = state.active
+  if (space === null) {
     body.append(element('p', 'rail-empty', state.loading ? 'Leyendo…' : 'Todavía no hay nada medido.'))
     return
   }
-
-  if (withPages.length === 0) {
-    body.append(element('p', 'rail-empty', 'Ninguna página todavía.'))
-  }
-
-  for (const space of withPages) body.append(...spaceBlock(space, state, handlers))
-
-  if (withoutPages.length > 0) {
-    body.append(element('div', 'rail-group', 'Sin páginas'))
-    for (const space of withoutPages) body.append(...spaceBlock(space, state, handlers))
-  }
-}
-
-function spaceBlock(space: Space, state: RailState, handlers: RailHandlers): HTMLElement[] {
-  const key = spaceKey(space)
-  const open = state.expanded.has(key)
-  const quiet = space.pageCount === 0
-
-  const row = document.createElement('button')
-  row.type = 'button'
-  row.className = quiet ? 'project-row project-row--quiet' : 'project-row'
-  row.setAttribute('role', 'treeitem')
-  row.setAttribute('aria-level', '1')
-  row.setAttribute('aria-expanded', String(open))
-
-  const chevron = element('span', 'project-chevron')
-  chevron.append(icon(open ? 'chevronDown' : 'chevronRight', 12))
-
-  const dot = element('span', 'dot')
-  dot.style.background = quiet ? 'transparent' : projectColor(space.projectId)
-  if (quiet) dot.style.border = '1px solid var(--elev-strong)'
-
-  const name = element('span', 'project-name', space.projectName ?? 'Sin proyecto')
-  const tally = element('span', 'project-count', String(quiet ? space.entryCount : space.pageCount))
-
-  row.append(chevron, dot, name, tally)
-  row.addEventListener('click', () => {
-    handlers.onToggle(key)
-  })
-
-  if (!open) return [row]
-
-  const children = element('div', 'project-children')
   if (space.pages.length === 0) {
-    children.append(element('p', 'rail-empty', 'Ninguna página en este espacio.'))
-    return [row, children]
+    body.append(element('p', 'rail-empty', 'Ninguna página en este espacio.'))
+    return
   }
-
-  for (const page of space.pages) children.append(...pageBlock(page, state, handlers, 2))
-  return [row, children]
+  for (const page of space.pages) body.append(...pageBlock(page, state, handlers, 1))
 }
 
 function pageBlock(page: PageNode, state: RailState, handlers: RailHandlers, level: number): HTMLElement[] {
@@ -273,6 +296,7 @@ function pageBlock(page: PageNode, state: RailState, handlers: RailHandlers, lev
   row.setAttribute('role', 'treeitem')
   row.setAttribute('aria-level', String(level))
   row.setAttribute('aria-selected', String(on))
+  row.style.setProperty('--level', String(level - 1))
   if (kids.length > 0) row.setAttribute('aria-expanded', String(open))
 
   const chevron = element('span', 'page-chevron')
@@ -284,7 +308,6 @@ function pageBlock(page: PageNode, state: RailState, handlers: RailHandlers, lev
     })
   }
 
-  const name = element('span', 'page-name', page.title)
   row.append(chevron)
   const meeting = latestMeeting(page.meetings)
   if (meeting !== null) {
@@ -293,10 +316,8 @@ function pageBlock(page: PageNode, state: RailState, handlers: RailHandlers, lev
     glyph.append(icon(isRemote(meeting) ? 'screen' : 'mic', 12))
     row.append(glyph)
   }
-  row.append(name)
-  if (page.issues.length > 0) {
-    row.append(element('span', 'page-count', String(page.issues.length)))
-  }
+  row.append(element('span', 'page-name', page.title))
+  if (page.issues.length > 0) row.append(element('span', 'page-count', String(page.issues.length)))
 
   row.addEventListener('click', () => {
     handlers.onSelectPage(page.pageId)
@@ -321,46 +342,55 @@ function renderResults(body: HTMLElement, state: RailState, handlers: RailHandle
     return
   }
 
-  body.append(
-    element('div', 'rail-tally', `${state.results.length} ${state.results.length === 1 ? 'nota' : 'notas'}`),
+  const total = state.results.reduce((sum, result) => sum + result.matchCount, 0)
+  const tally = element('div', 'rail-tally')
+  tally.append(
+    element('span', 'rail-label-inline', `${state.results.length} ${state.results.length === 1 ? 'página' : 'páginas'}`),
+    element('span', 'kbd', `${total} ${total === 1 ? 'coincidencia' : 'coincidencias'}`),
   )
+  body.append(tally)
 
   let project = '\u0000'
-  for (const hit of state.results) {
-    if (hit.projectSlug !== project) {
-      project = hit.projectSlug
+  for (const result of state.results) {
+    if (state.scope === 'all' && result.projectSlug !== project) {
+      project = result.projectSlug
       const header = element('div', 'result-project')
       const dot = element('span', 'dot')
-      dot.style.background = projectColor(hit.projectId)
-      header.append(dot, element('span', '', hit.projectName ?? 'Sin proyecto'))
+      dot.style.background = projectColor(result.projectId)
+      header.append(dot, element('span', '', result.projectName ?? 'Sin proyecto'))
       body.append(header)
     }
-    body.append(resultRow(hit, state.selected?.kind === 'entry' && state.selected.id === hit.entryId, handlers))
+    const on = state.selected?.kind === 'page' && state.selected.id === result.pageId
+    body.append(resultRow(result, on, handlers))
   }
 }
 
-function resultRow(hit: SearchHit, selected: boolean, handlers: RailHandlers): HTMLElement {
+function resultRow(result: PageResult, selected: boolean, handlers: RailHandlers): HTMLElement {
   const row = document.createElement('button')
   row.type = 'button'
   row.className = selected ? 'result-row result-row--on' : 'result-row'
+  row.setAttribute('aria-current', String(selected))
 
   const head = element('span', 'result-head')
-  head.append(element('span', 'result-title', hit.docTitle || hit.title))
-  head.append(element('span', 'result-count', String(hit.matchCount)))
-  row.append(head)
+  head.append(element('span', 'result-title', result.title), element('span', 'result-count', String(result.matchCount)))
+  row.append(head, element('span', 'result-crumb', result.crumb))
 
-  const first = hit.matches[0]
-  if (first) {
+  if (result.snippet !== null) {
     const snippet = element('span', 'result-snippet')
-    snippet.append(document.createTextNode(first.prefix.replace(/\s+/g, ' ')))
-    snippet.append(element('mark', 'hit', first.match))
-    snippet.append(document.createTextNode(first.suffix.replace(/\s+/g, ' ')))
+    snippet.append(document.createTextNode(`…${result.snippet.prefix.trimStart()}`))
+    snippet.append(element('mark', 'hit', result.snippet.match))
+    snippet.append(document.createTextNode(`${result.snippet.suffix.trimEnd()}…`))
     row.append(snippet)
   }
 
-  row.append(element('span', 'result-meta', `${hit.localDay.slice(5)} · ${hit.relPath.split('/').pop() ?? ''}`))
+  const sources = element('span', 'result-sources')
+  if (result.page > 0) sources.append(element('span', 'result-source', `página ${result.page}`))
+  if (result.entries > 0) sources.append(element('span', 'result-source', `entradas ${result.entries}`))
+  if (result.transcript > 0) sources.append(element('span', 'result-source', `transcripción ${result.transcript}`))
+  if (sources.childElementCount > 0) row.append(sources)
+
   row.addEventListener('click', () => {
-    handlers.onSelectEntry(hit.entryId)
+    handlers.onSelectResult(result)
   })
   return row
 }
