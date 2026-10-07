@@ -89,6 +89,30 @@ const ICONS: Record<string, IconShape> = {
   },
   plus: { view: '0 0 16 16', stroke: true, path: '<path d="M8 3.2v9.6M3.2 8h9.6"/>' },
   check: { view: '0 0 16 16', stroke: true, path: '<path d="M3.6 8.4 6.6 11.2 12.4 4.8"/>' },
+  calendar: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<rect x="2.2" y="3.2" width="11.6" height="10.6" rx="1.6"/><path d="M2.2 6.6h11.6M5.4 1.8v2.6M10.6 1.8v2.6"/>',
+  },
+  database: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<ellipse cx="8" cy="4" rx="5.4" ry="2"/><path d="M2.6 4v8c0 1.1 2.4 2 5.4 2s5.4-.9 5.4-2V4M2.6 8c0 1.1 2.4 2 5.4 2s5.4-.9 5.4-2"/>',
+  },
+  sliders: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M2.6 4h6.6M12 4h1.4M2.6 8h2.4M8 8h5.4M2.6 12h8M13.4 12h0"/><circle cx="10.6" cy="4" r="1.4"/><circle cx="6.6" cy="8" r="1.4"/><circle cx="12" cy="12" r="1.4"/>',
+  },
+  download: { view: '0 0 16 16', stroke: true, path: '<path d="M8 2.4v8M4.8 7.4 8 10.6l3.2-3.2M3.2 13.6h9.6"/>' },
+  trash: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M2.8 4.4h10.4M6.4 4.4V2.8h3.2v1.6M4.2 4.4l.6 8.6a1 1 0 0 0 1 .9h4.4a1 1 0 0 0 1-.9l.6-8.6"/>',
+  },
+  compress: { view: '0 0 16 16', stroke: true, path: '<path d="M5.6 2.4v3.2H2.4M10.4 2.4v3.2h3.2M5.6 13.6v-3.2H2.4M10.4 13.6v-3.2h3.2"/>' },
+  wave: { view: '0 0 16 16', stroke: true, path: '<path d="M1.6 8h2l2-5.2 3.2 10.4 2-5.2h3.6"/>' },
+  follow: { view: '0 0 16 16', stroke: true, path: '<circle cx="8" cy="8" r="2"/><circle cx="8" cy="8" r="5.4"/>' },
   inbox: {
     view: '0 0 16 16',
     stroke: true,
