@@ -23,7 +23,7 @@ function squash(text: string): string {
 }
 
 export function fromPageHit(hit: PageSearchHit): PageResult {
-  const first = hit.matches[0]
+  const first = hit.matches.find((match) => match.section !== null && !/^[\w-]+:\s/.test(match.prefix.trimStart())) ?? hit.matches[0]
   return {
     pageId: hit.pageId,
     title: hit.title,

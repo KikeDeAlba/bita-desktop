@@ -38,7 +38,7 @@ export function renderAside(host: HTMLElement, state: AsideState, handlers: Asid
   }
 
   const head = element('div', 'aside-head')
-  head.append(element('span', 'aside-title', 'En esta página'))
+  head.append(element('span', 'aside-title', state.custom === null ? 'En esta página' : 'Resumen'))
   const fold = document.createElement('button')
   fold.type = 'button'
   fold.className = 'icon-button'

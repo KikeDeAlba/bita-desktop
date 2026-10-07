@@ -475,12 +475,14 @@ function restoreText(row: HTMLElement): void {
   if (text !== null && original !== undefined) highlight(text, original.text, transcriptQuery)
 }
 
+function paintFollow(chip: HTMLElement): void {
+  chip.classList.toggle('room-follow--paused', !following)
+  chip.replaceChildren(icon(following ? 'follow' : 'pause', 11), element('span', '', following ? 'Siguiendo' : 'Seguimiento en pausa'))
+}
+
 function setFollowing(on: boolean): void {
   following = on
-  for (const chip of document.querySelectorAll<HTMLElement>('.room-follow')) {
-    chip.classList.toggle('room-follow--paused', !on)
-    chip.replaceChildren(icon(on ? 'follow' : 'pause', 11), element('span', '', on ? 'Siguiendo' : 'Seguimiento en pausa'))
-  }
+  for (const chip of document.querySelectorAll<HTMLElement>('.room-follow')) paintFollow(chip)
   for (const pill of document.querySelectorAll<HTMLElement>('.room-back')) pill.hidden = on
   if (on) {
     const list = document.querySelector<HTMLElement>('.room-list')
@@ -737,6 +739,7 @@ function transcriptColumn(remote: boolean, handlers: MeetingHandlers, initialQue
   follow.className = 'room-follow'
   follow.title = 'La transcripción sigue al audio; desplázate para pausar'
   follow.addEventListener('click', () => setFollowing(!following))
+  paintFollow(follow)
   tools.append(follow)
 
   const list = element('div', 'room-list')

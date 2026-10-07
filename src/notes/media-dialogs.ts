@@ -117,8 +117,8 @@ interface Modal {
 
 function openModal(labelId: string, width: 'narrow' | 'wide', onClose?: () => void): Modal {
   const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  const overlay = element('div', 'md-overlay')
-  const dialog = element('section', width === 'wide' ? 'md-dialog md-dialog--wide' : 'md-dialog')
+  const overlay = element('div', 'mdlg-overlay')
+  const dialog = element('section', width === 'wide' ? 'mdlg-dialog mdlg-dialog--wide' : 'mdlg-dialog')
   dialog.setAttribute('role', 'dialog')
   dialog.setAttribute('aria-modal', 'true')
   dialog.setAttribute('aria-labelledby', labelId)
@@ -172,12 +172,12 @@ function focusFirst(dialog: HTMLElement): void {
 }
 
 function head(id: string, glyph: Parameters<typeof icon>[0], tone: 'blue' | 'danger', title: string, subtitle: string): HTMLElement {
-  const block = element('div', 'md-head')
-  const badge = element('span', `md-badge md-badge--${tone}`)
+  const block = element('div', 'mdlg-head')
+  const badge = element('span', `mdlg-badge mdlg-badge--${tone}`)
   badge.append(icon(glyph, 17))
-  const heading = element('h2', 'md-title', title)
+  const heading = element('h2', 'mdlg-title', title)
   heading.id = id
-  block.append(badge, heading, element('p', 'md-subtitle', subtitle))
+  block.append(badge, heading, element('p', 'mdlg-subtitle', subtitle))
   return block
 }
 
@@ -191,31 +191,31 @@ export function button(label: string, className: string, onClick: () => void): H
 }
 
 function checkRow(title: string, note: string, size: string, checked: boolean, onChange: (value: boolean) => void): HTMLElement {
-  const label = element('label', 'md-check')
+  const label = element('label', 'mdlg-check')
   const input = document.createElement('input')
   input.type = 'checkbox'
   input.checked = checked
   input.addEventListener('change', () => onChange(input.checked))
-  const text = element('span', 'md-check-text')
-  text.append(element('span', 'md-check-title', title), element('span', 'v2-kbd', note))
-  label.append(input, text, element('span', 'md-mono', size))
+  const text = element('span', 'mdlg-check-text')
+  text.append(element('span', 'mdlg-check-title', title), element('span', 'v2-kbd', note))
+  label.append(input, text, element('span', 'mdlg-mono', size))
   return label
 }
 
 function freedBox(amount: string, note: string): HTMLElement {
-  const box = element('div', 'md-freed')
-  box.append(element('span', 'md-freed-label', 'Se liberan'), element('span', 'md-freed-figure', amount), element('span', 'v2-kbd', note))
+  const box = element('div', 'mdlg-freed')
+  box.append(element('span', 'mdlg-freed-label', 'Se liberan'), element('span', 'mdlg-freed-figure', amount), element('span', 'v2-kbd', note))
   return box
 }
 
 function errorLine(message: string): HTMLElement {
-  const line = element('p', 'md-error')
+  const line = element('p', 'mdlg-error')
   line.append(icon('warning', 13), element('span', '', message))
   return line
 }
 
 function shot(frameSrc: string | null, blur: string, alt: string): HTMLElement {
-  const box = element('div', 'md-shot')
+  const box = element('div', 'mdlg-shot')
   if (frameSrc !== null) {
     const image = document.createElement('img')
     image.src = frameSrc
@@ -224,9 +224,9 @@ function shot(frameSrc: string | null, blur: string, alt: string): HTMLElement {
     box.append(image)
     return box
   }
-  const page = element('div', 'md-shot-page')
+  const page = element('div', 'mdlg-shot-page')
   page.style.filter = `blur(${blur})`
-  page.append(element('span', 'md-shot-line md-shot-line--title'), element('span', 'md-shot-line'), element('span', 'md-shot-line md-shot-line--short'))
+  page.append(element('span', 'mdlg-shot-line mdlg-shot-line--title'), element('span', 'mdlg-shot-line'), element('span', 'mdlg-shot-line mdlg-shot-line--short'))
   box.append(page)
   return box
 }
@@ -243,7 +243,7 @@ export function openCompressDialog(
   let message = ''
   let result: MeetingRecord | null = null
 
-  const modal = openModal('md-compress-title', 'wide', () => {
+  const modal = openModal('mdlg-compress-title', 'wide', () => {
     outcomeWatchers.delete(record.id)
   })
 
@@ -266,26 +266,26 @@ export function openCompressDialog(
     const estimate = estimateCompressed(record, preset)
     const freed = Math.max(0, original - estimate) + (prune ? intermediate : 0)
     const nodes: HTMLElement[] = [
-      head('md-compress-title', 'compress', 'blue', 'Comprimir el video', `${record.title} · ${minutes(record)} · el video se conserva con menos calidad`),
+      head('mdlg-compress-title', 'compress', 'blue', 'Comprimir el video', `${record.title} · ${minutes(record)} · el video se conserva con menos calidad`),
     ]
 
     if (phase === 'running' || phase === 'done') {
-      const status = element('div', 'md-progress')
+      const status = element('div', 'mdlg-progress')
       if (phase === 'running') {
-        status.append(element('span', 'md-progress-title', 'Comprimiendo…'))
-        const track = element('div', 'md-progress-track')
-        track.append(element('span', 'md-progress-fill'))
+        status.append(element('span', 'mdlg-progress-title', 'Comprimiendo…'))
+        const track = element('div', 'mdlg-progress-track')
+        track.append(element('span', 'mdlg-progress-fill'))
         status.append(track)
-        status.append(element('p', 'md-note', 'Sigue en segundo plano aunque cierres esta ventana. El original se reemplaza solo cuando el nuevo archivo se verifica completo.'))
+        status.append(element('p', 'mdlg-note', 'Sigue en segundo plano aunque cierres esta ventana. El original se reemplaza solo cuando el nuevo archivo se verifica completo.'))
       } else {
-        status.append(element('span', 'md-progress-title md-progress-title--ok', 'Listo'))
+        status.append(element('span', 'mdlg-progress-title mdlg-progress-title--ok', 'Listo'))
         const now = result?.storage.recordingBytes
         status.append(
-          element('p', 'md-note', now === undefined ? 'El video ya quedó comprimido.' : `El video ahora pesa ${formatBytes(now)} (antes ${formatBytes(original)}).`),
+          element('p', 'mdlg-note', now === undefined ? 'El video ya quedó comprimido.' : `El video ahora pesa ${formatBytes(now)} (antes ${formatBytes(original)}).`),
         )
       }
       nodes.push(status)
-      const actions = element('div', 'md-actions')
+      const actions = element('div', 'mdlg-actions')
       const close = button('Cerrar', 'v2-btn v2-btn--lg', modal.close)
       close.dataset['autofocus'] = ''
       actions.append(close)
@@ -294,34 +294,34 @@ export function openCompressDialog(
       return
     }
 
-    const group = element('div', 'md-presets')
+    const group = element('div', 'mdlg-presets')
     group.setAttribute('role', 'radiogroup')
     group.setAttribute('aria-label', 'Nivel de compresión')
     for (const candidate of PRESETS) {
       const on = candidate.id === preset
       const option = document.createElement('button')
       option.type = 'button'
-      option.className = on ? 'md-preset md-preset--on' : 'md-preset'
+      option.className = on ? 'mdlg-preset mdlg-preset--on' : 'mdlg-preset'
       option.setAttribute('role', 'radio')
       option.setAttribute('aria-checked', String(on))
       option.append(
-        element('span', 'md-preset-name', candidate.name),
+        element('span', 'mdlg-preset-name', candidate.name),
         element('span', 'v2-kbd', candidate.spec),
-        element('span', 'md-preset-size', `≈ ${formatBytes(estimateCompressed(record, candidate.id))}`),
+        element('span', 'mdlg-preset-size', `≈ ${formatBytes(estimateCompressed(record, candidate.id))}`),
       )
       option.addEventListener('click', () => {
         preset = candidate.id
         paint()
-        modal.dialog.querySelector<HTMLElement>('.md-preset--on')?.focus()
+        modal.dialog.querySelector<HTMLElement>('.mdlg-preset--on')?.focus()
       })
       group.append(option)
     }
     nodes.push(group)
 
-    const previews = element('div', 'md-previews')
-    const before = element('figure', 'md-figure')
+    const previews = element('div', 'mdlg-previews')
+    const before = element('figure', 'mdlg-figure')
     before.append(shot(options.frameSrc, '0px', 'Captura original'), element('figcaption', 'v2-kbd', `Original · ${formatBytes(original)}`))
-    const after = element('figure', 'md-figure')
+    const after = element('figure', 'mdlg-figure')
     after.append(
       shot(options.frameSrc, spec?.blur ?? '0px', 'Vista previa comprimida'),
       element('figcaption', 'v2-kbd', `Vista previa · ${spec?.spec ?? ''} · ≈ ${formatBytes(estimate)}`),
@@ -330,7 +330,7 @@ export function openCompressDialog(
     nodes.push(previews)
 
     if (intermediate > 0) {
-      const wrap = element('div', 'md-pad')
+      const wrap = element('div', 'mdlg-pad')
       wrap.append(
         checkRow('Borrar también los WAV intermedios', 'solo sirven para volver a transcribir', formatBytes(intermediate), prune, (value) => {
           prune = value
@@ -344,13 +344,13 @@ export function openCompressDialog(
     nodes.push(
       element(
         'p',
-        'md-note md-pad',
+        'mdlg-note mdlg-pad',
         'Se comprime en segundo plano y el original se reemplaza solo cuando el nuevo archivo se verifica completo. Puedes seguir usando bita mientras tanto.',
       ),
     )
     if (phase === 'failed') nodes.push(errorLine(message))
 
-    const actions = element('div', 'md-actions')
+    const actions = element('div', 'mdlg-actions')
     const cancel = button('Cancelar', 'v2-btn v2-btn--lg', modal.close)
     const go = button(`Comprimir a ≈ ${formatBytes(estimate)}`, 'v2-btn v2-btn--lg v2-btn--blue', () => {
       options.beforeReplace()
@@ -382,7 +382,7 @@ export function openStripDialog(
   let message = ''
   const audio = estimateAudio(record)
   const video = Math.max(0, record.storage.recordingBytes - audio)
-  const modal = openModal('md-strip-title', 'narrow')
+  const modal = openModal('mdlg-strip-title', 'narrow')
 
   const item = (
     glyph: Parameters<typeof icon>[0],
@@ -392,13 +392,13 @@ export function openStripDialog(
     size: string,
     tag: string,
   ): HTMLElement => {
-    const row = element('div', 'md-item')
-    const badge = element('span', `md-item-icon md-item-icon--${tone}`)
+    const row = element('div', 'mdlg-item')
+    const badge = element('span', `mdlg-item-icon mdlg-item-icon--${tone}`)
     badge.append(icon(glyph, 12))
-    const text = element('span', 'md-item-text')
-    text.append(element('span', 'md-item-title', title), element('span', 'v2-kbd', note))
-    const right = element('span', 'md-item-right')
-    right.append(element('span', 'md-mono', size), element('span', `md-tag md-tag--${tone}`, tag))
+    const text = element('span', 'mdlg-item-text')
+    text.append(element('span', 'mdlg-item-title', title), element('span', 'v2-kbd', note))
+    const right = element('span', 'mdlg-item-right')
+    right.append(element('span', 'mdlg-mono', size), element('span', `mdlg-tag mdlg-tag--${tone}`, tag))
     row.append(badge, text, right)
     return row
   }
@@ -407,9 +407,9 @@ export function openStripDialog(
     const freed = video + (prune ? intermediate : 0)
     const total = record.storage.totalBytes
     const nodes: HTMLElement[] = [
-      head('md-strip-title', 'trash', 'danger', '¿Borrar el video de esta reunión?', `${record.title} · ${dayLabel(record)} · ${minutes(record)}`),
+      head('mdlg-strip-title', 'trash', 'danger', '¿Borrar el video de esta reunión?', `${record.title} · ${dayLabel(record)} · ${minutes(record)}`),
     ]
-    const list = element('div', 'md-items')
+    const list = element('div', 'mdlg-items')
     list.append(
       item('screen', 'danger', 'Video de la pantalla', fileName(record.recording), formatBytes(video), 'se borra'),
       item('wave', 'ok', 'Audio de Sala y Remotos', 'se extrae a recording.m4a · 2 pistas AAC', `≈ ${formatBytes(audio)}`, 'se queda'),
@@ -427,15 +427,15 @@ export function openStripDialog(
           paint()
         },
       )
-      check.classList.add('md-check--danger')
+      check.classList.add('mdlg-check--danger')
       list.append(check)
     }
     nodes.push(list)
     nodes.push(freedBox(formatBytes(freed), `de ${formatBytes(total)} · la reunión queda en ${formatBytes(Math.max(0, total - freed))}`))
-    nodes.push(element('p', 'md-note md-pad', 'No se puede deshacer. La página sigue igual: el reproductor pasa a modo audio con las capturas.'))
+    nodes.push(element('p', 'mdlg-note mdlg-pad', 'No se puede deshacer. La página sigue igual: el reproductor pasa a modo audio con las capturas.'))
     if (message.length > 0) nodes.push(errorLine(message))
 
-    const actions = element('div', 'md-actions')
+    const actions = element('div', 'mdlg-actions')
     const cancel = button('Cancelar', 'v2-btn v2-btn--lg', modal.close)
     cancel.disabled = busy
     const go = button(busy ? 'Borrando…' : 'Borrar video', 'v2-btn v2-btn--lg v2-btn--danger', () => {
@@ -469,12 +469,12 @@ export function openStripDialog(
 export function confirmDialog(options: { title: string; body: string; confirm: string; danger?: boolean }): Promise<boolean> {
   return new Promise((resolve) => {
     let answered = false
-    const modal = openModal('md-confirm-title', 'narrow', () => {
+    const modal = openModal('mdlg-confirm-title', 'narrow', () => {
       if (!answered) resolve(false)
     })
     const danger = options.danger === true
-    const nodes: HTMLElement[] = [head('md-confirm-title', danger ? 'trash' : 'check', danger ? 'danger' : 'blue', options.title, options.body)]
-    const actions = element('div', 'md-actions')
+    const nodes: HTMLElement[] = [head('mdlg-confirm-title', danger ? 'trash' : 'check', danger ? 'danger' : 'blue', options.title, options.body)]
+    const actions = element('div', 'mdlg-actions')
     const cancel = button('Cancelar', 'v2-btn v2-btn--lg', modal.close)
     cancel.dataset['autofocus'] = ''
     const ok = button(options.confirm, danger ? 'v2-btn v2-btn--lg v2-btn--danger' : 'v2-btn v2-btn--lg v2-btn--blue', () => {

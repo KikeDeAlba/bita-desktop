@@ -1187,7 +1187,7 @@ function keys(event: KeyboardEvent): void {
   }
 
   if (event.key === 'Escape') {
-    if (document.querySelector('.export-overlay, .md-overlay') !== null) return
+    if (document.querySelector('.export-overlay, .mdlg-overlay') !== null) return
     if (query.trim().length > 0) {
       runQuery('')
       return
