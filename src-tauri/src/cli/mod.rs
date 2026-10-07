@@ -9,6 +9,7 @@ use std::{env, fs};
 use serde::de::DeserializeOwned;
 use tauri::path::BaseDirectory;
 use tauri::{AppHandle, Manager};
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
@@ -20,6 +21,26 @@ const DOCS_OVERRIDE_ENV: &str = "BITA_DOCS_DIR";
 const EDITOR_OVERRIDE_ENV: &str = "BITA_EDITOR";
 const BUNDLED_ENTRY: &str = "bita/src/bin/bita.ts";
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
+
+#[derive(Debug, Clone, Default)]
+pub struct CallOptions {
+    pub timeout: Option<Duration>,
+    pub stdin: Option<String>,
+}
+
+impl CallOptions {
+    pub fn timeout(seconds: u64) -> Self {
+        Self {
+            timeout: Some(Duration::from_secs(seconds)),
+            stdin: None,
+        }
+    }
+
+    pub fn with_stdin(mut self, text: String) -> Self {
+        self.stdin = Some(text);
+        self
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
@@ -113,6 +134,14 @@ impl Cli {
         Ok((data, meta))
     }
 
+    pub async fn call_with_options<T: DeserializeOwned>(
+        &self,
+        args: &[&str],
+        options: CallOptions,
+    ) -> Result<(Option<T>, serde_json::Value), Problem> {
+        self.run_envelope::<T>(args, options).await
+    }
+
     async fn envelope<T: DeserializeOwned>(&self, args: &[&str]) -> Result<Option<T>, Problem> {
         self.envelope_with_meta::<T>(args).await.map(|(data, _)| data)
     }
@@ -121,6 +150,15 @@ impl Cli {
         &self,
         args: &[&str],
     ) -> Result<(Option<T>, serde_json::Value), Problem> {
+        self.run_envelope::<T>(args, CallOptions::default()).await
+    }
+
+    async fn run_envelope<T: DeserializeOwned>(
+        &self,
+        args: &[&str],
+        options: CallOptions,
+    ) -> Result<(Option<T>, serde_json::Value), Problem> {
+        let limit = options.timeout.unwrap_or(CALL_TIMEOUT);
         let mut command = Command::new(&self.node);
         command
             .arg(&self.entry)
@@ -133,7 +171,9 @@ impl Cli {
             .env("PATH", &self.path_env)
             .env("NO_COLOR", "1")
             .env("TERM", "dumb")
-            .stdin(Stdio::null())
+            .stdin(if options.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
 
         if let Some(docs) = env::var_os(DOCS_OVERRIDE_ENV) {
@@ -144,12 +184,12 @@ impl Cli {
             command.env("HOME", home);
         }
 
-        let output = timeout(CALL_TIMEOUT, command.output())
+        let output = timeout(limit, run_with_input(command, options.stdin))
             .await
             .map_err(|_| {
                 Problem::new(
                     ProblemKind::CliFailed,
-                    format!("El CLI no respondió en {} s.", CALL_TIMEOUT.as_secs()),
+                    format!("El CLI no respondió en {} s.", limit.as_secs()),
                 )
             })?
             .map_err(|error| {
@@ -207,6 +247,21 @@ impl Cli {
 
         Ok((envelope.data, envelope.meta.unwrap_or(serde_json::Value::Null)))
     }
+}
+
+async fn run_with_input(
+    mut command: Command,
+    input: Option<String>,
+) -> std::io::Result<std::process::Output> {
+    let mut child = command.spawn()?;
+    if let Some(text) = input {
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(text.as_bytes()).await?;
+            stdin.shutdown().await?;
+            drop(stdin);
+        }
+    }
+    child.wait_with_output().await
 }
 
 pub fn resolve_entry(app: &AppHandle) -> Option<(PathBuf, Source)> {
