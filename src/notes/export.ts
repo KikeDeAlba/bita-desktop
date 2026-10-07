@@ -313,6 +313,8 @@ function cover(chosen: Item[], options: ExportOptions): HTMLElement {
   return sheet
 }
 
+function ignoreCopy(): void {}
+
 async function pageSheet(item: Item, page: PageDocument, choice: Choice, options: ExportOptions): Promise<HTMLElement> {
   resetPage()
   const sheet = element('section', 'print-page')
@@ -326,6 +328,7 @@ async function pageSheet(item: Item, page: PageDocument, choice: Choice, options
     const blocks = splitSections(markdown)
     const render = (text: string): Node =>
       renderMarkdown(text, {
+        onCopy: ignoreCopy,
         drawio: { pageId: page.pageId, assetsRelDir: assetsRelDirOf(page.doc.relPath), onOpen: options.onOpenDocument },
       })
     if (blocks.lede.trim().length > 0) article.append(render(blocks.lede))
@@ -345,7 +348,7 @@ async function pageSheet(item: Item, page: PageDocument, choice: Choice, options
       if (view !== null && choice.minutes && view.summaryMarkdown !== null) {
         const block = element('section', 'print-extra')
         block.append(element('h2', 'doc-section-title', 'Minuta de la reunión'))
-        block.append(renderMarkdown(minutesBody(view.summaryMarkdown)))
+        block.append(renderMarkdown(minutesBody(view.summaryMarkdown), { onCopy: ignoreCopy }))
         sheet.append(block)
       }
       if (view !== null && choice.transcript && view.segments.length > 0) {
