@@ -20,7 +20,12 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         "Edición",
         true,
         &[
+            &PredefinedMenuItem::undo(app, Some("Deshacer"))?,
+            &PredefinedMenuItem::redo(app, Some("Rehacer"))?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, Some("Cortar"))?,
             &PredefinedMenuItem::copy(app, Some("Copiar"))?,
+            &PredefinedMenuItem::paste(app, Some("Pegar"))?,
             &PredefinedMenuItem::select_all(app, Some("Seleccionar todo"))?,
         ],
     )?;
