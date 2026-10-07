@@ -357,6 +357,8 @@ fn the_new_cli_searches_by_page() {
 fn the_new_cli_keeps_atlassian_settings_per_space() {
     let Some(sandbox) = Sandbox::new("atlassian") else { return };
     assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
+    let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
+    assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
     let set = sandbox.run(
         &[
             "project", "atlassian", "Contrato", "--via", "cli", "--confluence", "STI", "--pull", "on", "--push", "off",
