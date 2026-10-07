@@ -87,6 +87,7 @@ function signature(value: Draft | null): string {
 }
 
 export function renderSpaceSettings(target: HTMLElement, next: SpaceSettingsContext): void {
+  const entering = !(host === target && mounted())
   host = target
   context = next
   const nextDraft = draftOf(next.space.atlassian)
@@ -105,7 +106,7 @@ export function renderSpaceSettings(target: HTMLElement, next: SpaceSettingsCont
     baseline = signature(nextDraft)
     if (!dirty) draft = nextDraft
   }
-  if (sites === null && sitesFailure === null) void loadSites()
+  if (entering || (sites === null && sitesFailure === null)) void loadSites()
   paint(true)
 }
 
