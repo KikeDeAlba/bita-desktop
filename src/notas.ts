@@ -93,6 +93,8 @@ let meetingLoad: MeetingLoad | null = null
 let meetingPageId: number | null = null
 let meetingToken = 0
 
+let activeSpace: string | null = null
+
 let railPainted = ''
 let readerPainted = ''
 let asidePainted = ''
@@ -472,6 +474,18 @@ function allPages(): PageNode[] {
   }
   for (const space of spaces) walk(space.pages)
   return flat
+}
+
+export function currentSpace(): Space | null {
+  return spaces.find((space) => space.projectSlug === activeSpace) ?? null
+}
+
+export function meetingEntryIds(): Set<number> {
+  const ids = new Set<number>()
+  for (const page of allPages()) {
+    for (const meeting of page.meetings ?? []) ids.add(meeting.entryId)
+  }
+  return ids
 }
 
 function flatOrder(): number[] {
