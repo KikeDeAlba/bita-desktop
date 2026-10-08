@@ -109,6 +109,8 @@ pub struct MeetingView {
     pub storage: Option<MeetingStorage>,
     pub video: Option<VideoInfo>,
     pub video_removed_at: Option<String>,
+    pub answers: Vec<crate::ask::Answer>,
+    pub proposals: Vec<crate::proposals::Proposal>,
 }
 
 pub(crate) fn inside(dir: &Path, path: &str) -> Option<PathBuf> {
@@ -155,6 +157,7 @@ pub async fn meeting_for_entry(app: AppHandle, entry_id: i64) -> Result<Option<M
     if data.is_null() {
         return Ok(None);
     }
+    let extras = crate::proposals::extras_of(&data);
     let record: Record = serde_json::from_value(data).map_err(|error| {
         Problem::new(ProblemKind::Unreadable, format!("No entiendo la respuesta de recap: {error}"))
     })?;
@@ -207,6 +210,8 @@ pub async fn meeting_for_entry(app: AppHandle, entry_id: i64) -> Result<Option<M
         storage: record.storage,
         video: record.video,
         video_removed_at: record.video_removed_at,
+        answers: extras.answers,
+        proposals: extras.proposals,
     }))
 }
 

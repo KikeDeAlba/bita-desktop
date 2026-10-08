@@ -13,10 +13,12 @@ import {
   notesDocument,
   notesSearchPages,
   notesTakeFocus,
+  notesTakeMeeting,
   notesTree,
   onDocsChanged,
   onMeetingMediaChanged,
   onNotesFocus,
+  onNotesMeeting,
   onSyncFinished,
   openDocument,
   openExternal,
@@ -24,6 +26,7 @@ import {
   projects,
   recapList,
   searchTranscripts,
+  type MeetingFocus,
   type MeetingRecord,
   type PageDocument,
   type PageNode,
@@ -50,6 +53,7 @@ import { fromPageHit, withTranscripts, type PageResult, type SearchScope } from 
 import { closeSwitcher, isSwitcherOpen, toggleSwitcher, withPages } from './notes/switcher.ts'
 import { meetingCount, meetingsAside, renderMeetings, type MeetingsContext } from './notes/meetings.ts'
 import { openExportDialog } from './notes/export.ts'
+import { openHistoryDialog } from './notes/history.ts'
 import { isCompressing, onMediaJobs, openCompressDialog, openStripDialog } from './notes/media-dialogs.ts'
 import { renderStorage, storageTotal } from './notes/storage.ts'
 import { renderSpaceSettings } from './notes/space-settings.ts'
@@ -312,7 +316,11 @@ function meetingSignature(): string {
   if (meetingLoad === null) return 'none'
   const view = meetingLoad.state === 'ready' ? `${meetingLoad.view.id}:${meetingLoad.view.recording ?? ''}` : ''
   const busy = meetingLoad.state === 'ready' ? isCompressing(meetingLoad.view.id) : false
-  return `${meetingTab}:${meetingLoad.state}:${view}:${busy}`
+  const changes =
+    meetingLoad.state === 'ready'
+      ? `${(meetingLoad.view.proposals ?? []).map((proposal) => `${proposal.n}${proposal.status}`).join(',')}/${(meetingLoad.view.answers ?? []).length}`
+      : ''
+  return `${meetingTab}:${meetingLoad.state}:${view}:${busy}:${changes}`
 }
 
 function spacesSignature(): string {
@@ -467,6 +475,9 @@ function paint(): void {
         onExport: exportCurrent,
         onCompress: compressCurrent,
         onStripVideo: stripCurrent,
+        onHistory: historyCurrent,
+        onOpenPage: (pageId) => selectPage(pageId),
+        onMeetingChanged: reloadMeeting,
       })
       afterReaderPaint()
     }
@@ -944,6 +955,22 @@ async function loadPage(pageId: number, keepTab = false): Promise<void> {
   paint()
 }
 
+function historyCurrent(): void {
+  if (opened === null) return
+  const page = opened
+  openHistoryDialog({ pageId: page.pageId, title: page.title, projectName: page.projectName }, () => {
+    void loadPage(page.pageId, true)
+  })
+}
+
+function focusOnMeeting(focus: MeetingFocus): void {
+  const page = allPages().find((candidate) => (candidate.meetings ?? []).some((meeting) => meeting.entryId === focus.entryId))
+  if (page === undefined) return
+  const tab = (['document', 'minutes', 'meeting', 'proposals', 'answers'] as const).find((name) => name === focus.tab) ?? 'document'
+  meetingTab = tab
+  selectPage(page.pageId, true)
+}
+
 function reloadMeeting(): void {
   if (opened === null) return
   const info = latestMeeting(opened.meetings)
@@ -1274,8 +1301,12 @@ async function start(): Promise<void> {
   void loadClients()
   refreshStorageTotal()
 
+  onNotesMeeting(focusOnMeeting)
+
   const focus = await notesTakeFocus()
   if (focus !== null) focusOnPage(focus)
+  const meetingFocus = await notesTakeMeeting()
+  if (meetingFocus !== null) focusOnMeeting(meetingFocus)
 }
 
 void start()

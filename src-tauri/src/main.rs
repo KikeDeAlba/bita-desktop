@@ -1,3 +1,4 @@
+mod ask;
 mod atlassian_cmd;
 mod cli;
 mod commands;
@@ -6,11 +7,13 @@ mod menu;
 mod model;
 mod notes;
 mod media;
+mod live;
 mod meeting;
 mod notes_cmd;
 mod panel;
 mod pasteboard;
 mod pdf;
+mod proposals;
 mod recap;
 mod screen;
 mod state;
@@ -36,7 +39,9 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             panel::toggle(app);
         }))
+        .plugin(live::shortcut_plugin())
         .manage(AppState::new())
+        .manage(live::LiveSession::default())
         .manage(TrayAnchor::default())
         .manage(notes::NotesFocus::default())
         .invoke_handler(tauri::generate_handler![
@@ -92,8 +97,33 @@ fn main() {
             atlassian_cmd::confluence_sync,
             atlassian_cmd::confluence_sync_status,
             atlassian_cmd::confluence_resolve,
+            commands::open_notes_meeting,
+            commands::notes_take_meeting,
+            live::live_state,
+            live::live_show,
+            live::live_hide,
+            live::live_ask,
+            live::live_cancel,
+            live::live_sources,
+            live::recap_config,
+            live::recap_config_set,
+            live::live_shortcut_set,
+            live::open_source_file,
+            proposals::docs_branch_diff,
+            proposals::page_history,
+            proposals::page_diff,
+            proposals::page_restore,
+            proposals::proposal_accept,
+            proposals::proposal_reject,
+            proposals::proposal_show,
+            proposals::pending_proposals,
             commands::quit
         ])
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() == menu::LIVE {
+                live::toggle(app);
+            }
+        })
         .setup(|app| {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             menu::create(app.handle())?;
@@ -101,6 +131,8 @@ fn main() {
             panel::wire(app.handle());
             watch::spawn(app.handle().clone(), cli::database_path());
             watch::spawn_docs(app.handle().clone(), cli::docs_root());
+            live::register_shortcut(app.handle());
+            live::spawn_watch(app.handle().clone());
             spawn_refresh(app.handle().clone());
             spawn_tick(app.handle().clone());
             sync::spawn(app.handle().clone());

@@ -109,13 +109,13 @@ function fileName(path: string | null | undefined): string {
   return path.split('/').pop() ?? path
 }
 
-interface Modal {
+export interface Modal {
   dialog: HTMLElement
   close: () => void
   isOpen: () => boolean
 }
 
-function openModal(labelId: string, width: 'narrow' | 'wide', onClose?: () => void): Modal {
+export function openModal(labelId: string, width: 'narrow' | 'wide', onClose?: () => void): Modal {
   const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
   const overlay = element('div', 'mdlg-overlay')
   const dialog = element('section', width === 'wide' ? 'mdlg-dialog mdlg-dialog--wide' : 'mdlg-dialog')

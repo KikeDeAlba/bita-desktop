@@ -77,7 +77,7 @@ pub fn spawn_docs(app: AppHandle, root: PathBuf) -> bool {
             let Ok(events) = batch else {
                 continue;
             };
-            if !events.iter().any(touches_markdown) {
+            if !events.iter().any(|event| touches_markdown(&root, event)) {
                 continue;
             }
 
@@ -93,14 +93,25 @@ pub fn spawn_docs(app: AppHandle, root: PathBuf) -> bool {
     true
 }
 
-fn touches_markdown(event: &notify_debouncer_full::DebouncedEvent) -> bool {
+fn touches_markdown(root: &Path, event: &notify_debouncer_full::DebouncedEvent) -> bool {
     if matches!(event.kind, notify::EventKind::Access(_)) {
         return false;
     }
     event
         .paths
         .iter()
-        .any(|path| path.extension().and_then(|value| value.to_str()) == Some("md"))
+        .any(|path| !inside_git(root, path) && !transient(path) && path.extension().and_then(|value| value.to_str()) == Some("md"))
+}
+
+fn transient(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".lock") || name.contains(".tmp-"))
+}
+
+fn inside_git(root: &Path, path: &Path) -> bool {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    relative.components().any(|part| part.as_os_str() == ".git")
 }
 
 fn fingerprint(database: &Path) -> Fingerprint {
@@ -121,7 +132,24 @@ mod tests {
     use std::fs;
     use std::time::Duration;
 
-    use super::{fingerprint, same};
+    use super::{fingerprint, inside_git, same, transient};
+    use std::path::Path;
+
+    #[test]
+    fn the_git_folder_of_the_docs_is_not_a_page_change() {
+        let root = Path::new("/docs");
+        assert!(inside_git(root, Path::new("/docs/.git/COMMIT_EDITMSG.md")));
+        assert!(inside_git(root, Path::new("/docs/.git/refs/heads/main")));
+        assert!(!inside_git(root, Path::new("/docs/codi/reglas.md")));
+        assert!(!inside_git(root, Path::new("/docs/codi/.gitkeep")));
+    }
+
+    #[test]
+    fn lock_and_temporary_files_are_not_page_changes() {
+        assert!(transient(Path::new("/docs/codi/reglas.md.lock")));
+        assert!(transient(Path::new("/docs/codi/reglas.tmp-123.md")));
+        assert!(!transient(Path::new("/docs/codi/reglas.md")));
+    }
 
     #[test]
     fn a_missing_database_has_no_fingerprint() {

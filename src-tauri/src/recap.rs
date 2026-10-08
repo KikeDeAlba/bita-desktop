@@ -11,8 +11,9 @@ use crate::cli::node;
 use crate::model::{Problem, ProblemKind};
 
 const RECAP_OVERRIDE_ENV: &str = "RECAP_CLI";
-const PASSTHROUGH_ENV: [&str; 4] = ["RECAP_ROOT", "RECAP_STATE_DIR", "RECAP_CONFIG_PATH", "RECAP_DATA_DIR"];
+const PASSTHROUGH_ENV: [&str; 5] = ["RECAP_ROOT", "RECAP_STATE_DIR", "RECAP_CONFIG_PATH", "RECAP_DATA_DIR", "XDG_STATE_HOME"];
 pub const NOT_FOUND: &str = "MEETING_NOT_FOUND";
+const BASE_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 #[derive(Debug, Deserialize)]
 struct Envelope {
@@ -93,23 +94,8 @@ pub fn recap_binary() -> Option<PathBuf> {
 pub async fn recap_call(args: &[&str], limit: Duration) -> Result<Value, RecapError> {
     let recap = recap_binary().ok_or(RecapError::Missing)?;
 
-    let mut command = Command::new(&recap);
-    command
-        .args(args)
-        .arg("--json")
-        .current_dir("/")
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
-        .stdin(Stdio::null())
-        .kill_on_drop(true);
-    if let Some(home) = node::home() {
-        command.env("HOME", home);
-    }
-    for key in PASSTHROUGH_ENV {
-        if let Some(value) = std::env::var_os(key) {
-            command.env(key, value);
-        }
-    }
+    let mut command = recap_command(&recap, BASE_PATH);
+    command.args(args).arg("--json");
 
     let output = timeout(limit, command.output())
         .await
@@ -126,7 +112,38 @@ pub async fn recap_call(args: &[&str], limit: Duration) -> Result<Value, RecapEr
     parse(&String::from_utf8_lossy(&output.stdout), &String::from_utf8_lossy(&output.stderr))
 }
 
-fn parse(stdout: &str, stderr: &str) -> Result<Value, RecapError> {
+pub fn recap_command(recap: &std::path::Path, path: &str) -> Command {
+    let mut command = Command::new(recap);
+    command
+        .current_dir("/")
+        .env_clear()
+        .env("PATH", path)
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    if let Some(home) = node::home() {
+        command.env("HOME", home);
+    }
+    for key in PASSTHROUGH_ENV {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    command
+}
+
+pub fn assistant_path() -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(home) = node::home() {
+        parts.push(home.join(".local/bin").display().to_string());
+        parts.push(home.join(".claude/local").display().to_string());
+    }
+    parts.push("/opt/homebrew/bin".into());
+    parts.push("/usr/local/bin".into());
+    parts.push(BASE_PATH.into());
+    parts.join(":")
+}
+
+pub(crate) fn parse(stdout: &str, stderr: &str) -> Result<Value, RecapError> {
     let line = stdout.trim();
     if line.is_empty() {
         return Err(RecapError::Failed(Problem::new(

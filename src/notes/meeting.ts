@@ -5,7 +5,7 @@ import { renderMarkdown } from './markdown.ts'
 import { formatBytes } from './media-dialogs.ts'
 import './room.css'
 
-export type MeetingTab = 'document' | 'minutes' | 'meeting'
+export type MeetingTab = 'document' | 'minutes' | 'meeting' | 'proposals' | 'answers'
 
 export type MeetingLoad =
   | { state: 'loading' }
@@ -71,14 +71,20 @@ export function hasVideo(view: MeetingView): boolean {
   return view.hasVideo
 }
 
-export function tabsFor(): MeetingTab[] {
-  return ['document', 'minutes', 'meeting']
+export function tabsFor(load?: MeetingLoad): MeetingTab[] {
+  const tabs: MeetingTab[] = ['document', 'minutes', 'meeting']
+  if (load?.state !== 'ready') return tabs
+  if ((load.view.proposals ?? []).length > 0) tabs.push('proposals')
+  if ((load.view.answers ?? []).length > 0) tabs.push('answers')
+  return tabs
 }
 
-const TAB_LABEL: Record<MeetingTab, string> = {
+export const TAB_LABEL: Record<MeetingTab, string> = {
   document: 'Documento',
   minutes: 'Minuta',
   meeting: 'Reunión',
+  proposals: 'Cambios propuestos',
+  answers: 'Respuestas en vivo',
 }
 
 export function meetingWhen(iso: string): string {
@@ -155,7 +161,7 @@ export function tabBar(context: MeetingContext, onTab: (tab: MeetingTab) => void
     context.load.state === 'ready' && context.load.view.summaryMarkdown !== null
       ? minutesCounts(context.load.view.summaryMarkdown)
       : null
-  for (const tab of tabsFor()) {
+  for (const tab of tabsFor(context.load)) {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = tab === context.tab ? 'meeting-tab meeting-tab--on' : 'meeting-tab'
@@ -166,6 +172,13 @@ export function tabBar(context: MeetingContext, onTab: (tab: MeetingTab) => void
       const tally = element('span', 'kbd', `${counts.agreements} · ${counts.pending}`)
       tally.title = `${counts.agreements} acuerdos · ${counts.pending} pendientes`
       button.append(tally)
+    }
+    if (tab === 'proposals' && context.load.state === 'ready') {
+      const open = context.load.view.proposals.filter((proposal) => proposal.status === 'pending').length
+      if (open > 0) button.append(element('span', 'meeting-tab-badge', String(open)))
+    }
+    if (tab === 'answers' && context.load.state === 'ready') {
+      button.append(element('span', 'kbd', String(context.load.view.answers.length)))
     }
     button.addEventListener('click', () => onTab(tab))
     bar.append(button)
