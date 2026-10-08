@@ -8,6 +8,7 @@ use tauri::{
 pub const LABEL: &str = "notas";
 pub const FOCUS_EVENT: &str = "bita://notes-focus";
 pub const STALE_EVENT: &str = "bita://docs-changed";
+pub const MEETING_EVENT: &str = "bita://notes-meeting";
 
 const KEEP_ACCESSORY_ENV: &str = "BITA_KEEP_ACCESSORY";
 const SKIP_ON_START_ENV: &str = "BITA_NO_OPEN_NOTES";
@@ -39,12 +40,28 @@ fn initial_size(app: &AppHandle) -> (f64, f64) {
     )
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MeetingFocus {
+    pub entry_id: i64,
+    pub tab: String,
+}
+
 #[derive(Default)]
 pub struct NotesFocus {
     entry: Mutex<Option<i64>>,
+    meeting: Mutex<Option<MeetingFocus>>,
 }
 
 impl NotesFocus {
+    fn remember_meeting(&self, focus: Option<MeetingFocus>) {
+        *self.meeting.lock().expect("focus poisoned") = focus;
+    }
+
+    fn take_meeting(&self) -> Option<MeetingFocus> {
+        self.meeting.lock().expect("focus poisoned").take()
+    }
+
     fn remember(&self, entry: Option<i64>) {
         *self.entry.lock().expect("focus poisoned") = entry;
     }
@@ -66,6 +83,21 @@ pub fn is_visible(app: &AppHandle) -> bool {
 
 pub fn take_focus(app: &AppHandle) -> Option<i64> {
     app.state::<NotesFocus>().take()
+}
+
+pub fn take_meeting(app: &AppHandle) -> Option<MeetingFocus> {
+    app.state::<NotesFocus>().take_meeting()
+}
+
+pub fn open_meeting(app: &AppHandle, focus: MeetingFocus) -> tauri::Result<()> {
+    let existing = find(app);
+    if let Some(window) = existing.as_ref() {
+        let _ = window.emit(MEETING_EVENT, focus.clone());
+        app.state::<NotesFocus>().remember_meeting(None);
+    } else {
+        app.state::<NotesFocus>().remember_meeting(Some(focus));
+    }
+    open(app, None)
 }
 
 pub fn open(app: &AppHandle, entry_id: Option<i64>) -> tauri::Result<()> {

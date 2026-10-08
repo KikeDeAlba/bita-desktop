@@ -12,6 +12,7 @@ pub const ID: &str = "bita";
 
 const OPEN: &str = "open";
 const QUIT: &str = "quit";
+const LIVE: &str = "tray-live";
 
 const TEMPLATE_ICON: &[u8] = include_bytes!("../icons/trayTemplate@2x.png");
 
@@ -22,7 +23,8 @@ const UNNAMED: &str = "sin nombre";
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN, "Abrir bita", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, QUIT, "Salir de bita", true, Some("Cmd+Q"))?;
-    let menu = Menu::with_items(app, &[&open, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let live = MenuItem::with_id(app, LIVE, "Asistente de reunión", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &live, &PredefinedMenuItem::separator(app)?, &quit])?;
 
     TrayIconBuilder::with_id(ID)
         .icon(Image::from_bytes(TEMPLATE_ICON)?)
@@ -33,6 +35,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             QUIT => app.exit(0),
             OPEN => panel::toggle(app),
+            LIVE => crate::live::toggle(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

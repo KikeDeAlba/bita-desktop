@@ -6,8 +6,12 @@ import {
   doctorReport,
   isMeetingKind,
   MEETING_KINDS,
+  liveState,
   notesToday,
   onDocsChanged,
+  onLiveState,
+  onLiveTranscript,
+  pendingProposals,
   onSnapshot,
   openNotes,
   pending,
@@ -21,7 +25,9 @@ import {
   unsetScope,
   worked,
   type LiveTimer,
+  type LiveView,
   type NoteRow,
+  type PendingMeeting,
   type Problem,
   type Project,
   type Scope,
@@ -32,6 +38,7 @@ import { element, iconButton, must } from './dom.ts'
 import { clock, human, startedAt } from './format.ts'
 import { timerDoc, todayNotes } from './notes-panel.ts'
 import { renderSettings } from './settings.ts'
+import { assistantRow, liveMatches, pendingCount, proposalsCard, renderLiveSettings } from './live-panel.ts'
 import { projectColor, renderPending, renderRepos, renderWorked } from './tabs.ts'
 
 const TABS = ['ahora', 'hoy', 'jira', 'repos'] as const
@@ -66,6 +73,8 @@ let painted = ''
 let busy = false
 let inSettings = false
 let notesOfToday: NoteRow[] = []
+let live: LiveView | null = null
+let proposals: PendingMeeting[] = []
 
 function isTab(value: string): value is Tab {
   return (TABS as readonly string[]).includes(value)
@@ -82,7 +91,12 @@ function signature(): string {
   const notes = notesOfToday
     .map((row) => `${row.entryId}:${row.doc?.sectionCount ?? -1}`)
     .join('|')
-  return `${timers}::${notes}::${editing}::${failure?.message ?? ''}::${confirmingDiscard}`
+  const assist =
+    live === null || live.active === null
+      ? 'off'
+      : `${live.active.meetingId}:${live.entryId}:${live.answers.length}:${live.transcript.length > 0}`
+  const changes = proposals.map((meeting) => `${meeting.entryId}:${meeting.proposals.length}`).join('|')
+  return `${timers}::${notes}::${editing}::${failure?.message ?? ''}::${confirmingDiscard}::${assist}::${changes}`
 }
 
 async function act(run: () => Promise<Snapshot>): Promise<void> {
@@ -152,6 +166,8 @@ function timerCard(timer: LiveTimer): HTMLElement {
   face.dataset['clock'] = String(timer.id)
   row.append(face, stopButton(timer))
   card.append(row)
+
+  if (live !== null && liveMatches(timer, live)) card.append(assistantRow(live))
 
   const doc = timerDoc(timer)
   if (doc !== null) card.append(doc)
@@ -321,6 +337,8 @@ function renderAhora(): void {
 
   if (failure !== null) view.append(problemBlock(failure))
 
+  for (const meeting of proposals) view.append(proposalsCard(meeting))
+
   if (latest.running.length === 0) {
     const empty = element('div', 'empty')
     empty.append(element('p', 'empty-title', 'El reloj está parado'))
@@ -358,6 +376,36 @@ async function loadTodayNotes(): Promise<void> {
   }
   painted = ''
   paint()
+}
+
+async function loadLive(): Promise<void> {
+  try {
+    live = await liveState()
+  } catch {
+    live = null
+  }
+  if (!inSettings) paint()
+}
+
+async function loadProposals(): Promise<void> {
+  try {
+    proposals = await pendingProposals()
+  } catch {
+    proposals = []
+  }
+  notesButton.classList.toggle('icon-button--dot', pendingCount(proposals) > 0)
+  if (!inSettings) paint()
+}
+
+function showLiveSettings(): void {
+  inSettings = true
+  tabStrip.hidden = true
+  launcher.hidden = true
+  painted = ''
+  const project = live?.project ?? latest.running.find((timer) => timer.projectName !== null)?.projectName ?? null
+  renderLiveSettings(view, live?.shortcut ?? 'Ctrl+Alt+Space', project, () => {
+    void showSettings()
+  })
 }
 
 function tickClocks(): void {
@@ -460,6 +508,7 @@ async function showSettings(): Promise<void> {
       () => {
         void showSettings()
       },
+      showLiveSettings,
     )
   } catch (error) {
     if (inSettings) failureView(error)
@@ -533,6 +582,23 @@ async function start(): Promise<void> {
 
   onDocsChanged(() => {
     void loadTodayNotes()
+    void loadProposals()
+  })
+
+  onLiveState(() => {
+    void loadLive()
+    void loadProposals()
+  })
+
+  onLiveTranscript((update) => {
+    if (live === null || live.active?.meetingId !== update.meetingId) return
+    const hadLines = live.transcript.length > 0
+    live.transcript = update.transcript
+    if (!hadLines && !inSettings) paint()
+  })
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void loadProposals()
   })
 
   latest = await snapshot()
@@ -557,6 +623,8 @@ async function start(): Promise<void> {
   }
 
   void loadTodayNotes()
+  void loadLive()
+  void loadProposals()
 }
 
 void start()

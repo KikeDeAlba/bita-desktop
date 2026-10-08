@@ -6,6 +6,10 @@ export const DOCS_CHANGED_EVENT = 'bita://docs-changed'
 export const NOTES_FOCUS_EVENT = 'bita://notes-focus'
 export const MEETING_MEDIA_EVENT = 'bita://meeting-media-changed'
 export const SYNC_FINISHED_EVENT = 'bita://confluence-synced'
+export const LIVE_ANSWER_EVENT = 'bita://live-answer'
+export const LIVE_STATE_EVENT = 'bita://live-state'
+export const LIVE_TRANSCRIPT_EVENT = 'bita://live-transcript'
+export const NOTES_MEETING_EVENT = 'bita://notes-meeting'
 
 export type ProblemKind =
   | 'node-missing'
@@ -378,6 +382,173 @@ export interface MeetingView {
   storage: MeetingStorage | null
   video: MeetingVideoInfo | null
   videoRemovedAt: string | null
+  answers: LiveAnswer[]
+  proposals: Proposal[]
+}
+
+export type SourceKind = 'page' | 'file' | 'commit'
+
+export interface AnswerSource {
+  kind: SourceKind | string
+  label: string
+  pageId?: number
+  path?: string
+  line?: number
+  repo?: string
+  sha?: string
+}
+
+export interface LiveAnswer {
+  id: string
+  askedAt: string
+  question: string
+  answer: string
+  found: boolean
+  sources: AnswerSource[]
+}
+
+export type StreamEvent =
+  | { type: 'question'; text: string }
+  | { type: 'progress'; text: string }
+  | { type: 'delta'; text: string }
+  | { type: 'source'; source: AnswerSource }
+  | { type: 'done'; answer: LiveAnswer }
+  | { type: 'error'; code: string; message: string }
+
+export interface LiveAnswerEvent {
+  askId: number
+  event: StreamEvent
+}
+
+export interface ActiveMeeting {
+  meetingId: string
+  dir: string
+  mode: string | null
+  startedAt: string | null
+}
+
+export interface LiveView {
+  active: ActiveMeeting | null
+  title: string | null
+  entryId: number | null
+  project: string | null
+  transcript: MeetingSegment[]
+  answers: LiveAnswer[]
+  asking: boolean
+  shortcut: string
+  visible: boolean
+}
+
+export interface LiveTranscriptUpdate {
+  meetingId: string
+  transcript: MeetingSegment[]
+}
+
+export interface LiveConfig {
+  enabled: boolean
+  openWindow: boolean
+  proposals: boolean
+  assistModel: string | null
+  maxChunkSeconds: number | null
+}
+
+export interface LiveSources {
+  project: string
+  docsRoot: string
+  repos: { path: string; slug: string; exists: boolean }[]
+}
+
+export type ProposalStatus = 'pending' | 'accepted' | 'rejected' | 'stale'
+
+export interface ProposalQuote {
+  startMs: number
+  channel: string | null
+  text: string
+}
+
+export interface Proposal {
+  n: number
+  pageId: number
+  pageTitle: string | null
+  section: string | null
+  title: string
+  rationale: string | null
+  quotes: ProposalQuote[]
+  branch: string | null
+  sha: string | null
+  status: ProposalStatus | string
+  appliedSha: string | null
+  file?: string | null
+  updatedAt?: string | null
+}
+
+export interface ProposalDetail {
+  proposal: Proposal
+  markdown: string | null
+}
+
+export interface DiffLine {
+  kind: 'context' | 'add' | 'del' | string
+  text: string
+  oldLine: number | null
+  newLine: number | null
+}
+
+export interface Hunk {
+  header: string
+  lines: DiffLine[]
+}
+
+export interface BranchCommit {
+  sha: string
+  pageId: number | null
+  path: string | null
+  reason: string | null
+  hunks: Hunk[]
+  diff: string
+}
+
+export interface BranchDiff {
+  branch: string
+  commits: BranchCommit[]
+}
+
+export type RevisionSource = 'manual' | 'meeting' | 'confluence-pull' | 'restore' | 'note' | 'import' | 'unknown'
+
+export interface Revision {
+  sha: string
+  date: string
+  subject: string
+  source: RevisionSource | string
+  reason: string | null
+  entryId: number | null
+}
+
+export interface PageHistory {
+  pageId: number
+  path: string
+  revisions: Revision[]
+}
+
+export interface PageDiff {
+  pageId: number
+  from: string
+  to: string
+  diff: string
+  hunks: Hunk[]
+}
+
+export interface PendingMeeting {
+  entryId: number
+  meetingId: string | null
+  title: string
+  endedAt: string | null
+  proposals: Proposal[]
+}
+
+export interface MeetingFocus {
+  entryId: number
+  tab: string
 }
 
 export interface MeetingStorage {
@@ -899,6 +1070,110 @@ export function quit(): Promise<void> {
 
 export function onSnapshot(handler: (value: Snapshot) => void): void {
   void listen<Snapshot>(SNAPSHOT_EVENT, (event) => {
+    handler(event.payload)
+  })
+}
+
+export function liveState(): Promise<LiveView> {
+  return invoke<LiveView>('live_state')
+}
+
+export function liveShow(): Promise<void> {
+  return invoke('live_show')
+}
+
+export function liveHide(): Promise<void> {
+  return invoke('live_hide')
+}
+
+export function liveAsk(question: string | null): Promise<number> {
+  return invoke<number>('live_ask', { question })
+}
+
+export function liveCancel(): Promise<boolean> {
+  return invoke<boolean>('live_cancel')
+}
+
+export function liveSources(project: string): Promise<LiveSources | null> {
+  return invoke<LiveSources | null>('live_sources', { project })
+}
+
+export function recapConfig(): Promise<LiveConfig | null> {
+  return invoke<LiveConfig | null>('recap_config')
+}
+
+export function recapConfigSet(key: string, value: boolean | number | string | null): Promise<LiveConfig | null> {
+  return invoke<LiveConfig | null>('recap_config_set', { key, value })
+}
+
+export function liveShortcutSet(accelerator: string): Promise<string> {
+  return invoke<string>('live_shortcut_set', { accelerator })
+}
+
+export function openSourceFile(path: string): Promise<void> {
+  return invoke('open_source_file', { path })
+}
+
+export function openNotesMeeting(entryId: number, tab: string): Promise<void> {
+  return invoke('open_notes_meeting', { entryId, tab })
+}
+
+export function notesTakeMeeting(): Promise<MeetingFocus | null> {
+  return invoke<MeetingFocus | null>('notes_take_meeting')
+}
+
+export function docsBranchDiff(branch: string, sha: string): Promise<BranchDiff> {
+  return invoke<BranchDiff>('docs_branch_diff', { branch, sha })
+}
+
+export function pageHistory(pageId: number): Promise<PageHistory> {
+  return invoke<PageHistory>('page_history', { pageId })
+}
+
+export function pageDiff(pageId: number, rev: string): Promise<PageDiff> {
+  return invoke<PageDiff>('page_diff', { pageId, rev })
+}
+
+export function pageRestore(pageId: number, sha: string): Promise<unknown> {
+  return invoke('page_restore', { pageId, sha })
+}
+
+export function proposalAccept(meetingId: string, n: number, markdown: string | null): Promise<Proposal> {
+  return invoke<Proposal>('proposal_accept', { meetingId, n, markdown })
+}
+
+export function proposalShow(meetingId: string, n: number): Promise<ProposalDetail> {
+  return invoke<ProposalDetail>('proposal_show', { meetingId, n })
+}
+
+export function proposalReject(meetingId: string, n: number): Promise<Proposal> {
+  return invoke<Proposal>('proposal_reject', { meetingId, n })
+}
+
+export function pendingProposals(): Promise<PendingMeeting[]> {
+  return invoke<PendingMeeting[]>('pending_proposals')
+}
+
+export function onLiveAnswer(handler: (event: LiveAnswerEvent) => void): void {
+  void listen<LiveAnswerEvent>(LIVE_ANSWER_EVENT, (event) => {
+    handler(event.payload)
+  })
+}
+
+export function onLiveState(handler: () => void): void {
+  void listen(LIVE_STATE_EVENT, () => {
+    handler()
+  })
+}
+
+export function onLiveTranscript(handler: (update: LiveTranscriptUpdate) => void): void {
+  void listen<LiveTranscriptUpdate>(LIVE_TRANSCRIPT_EVENT, (event) => {
+    handler(event.payload)
+  })
+}
+
+export function onNotesMeeting(handler: (focus: MeetingFocus) => void): void {
+  void listen<MeetingFocus>(NOTES_MEETING_EVENT, (event) => {
     handler(event.payload)
   })
 }
