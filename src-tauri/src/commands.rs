@@ -222,6 +222,25 @@ pub fn notes_take_focus(app: AppHandle) -> Option<i64> {
 }
 
 #[tauri::command]
+pub fn open_notes_meeting(app: AppHandle, entry_id: i64, tab: String) -> Result<(), Problem> {
+    let tab = match tab.as_str() {
+        "proposals" | "answers" | "meeting" | "minutes" => tab,
+        _ => "document".to_string(),
+    };
+    crate::notes::open_meeting(&app, crate::notes::MeetingFocus { entry_id, tab }).map_err(|error| {
+        Problem::new(
+            ProblemKind::Unreadable,
+            format!("No pude abrir la ventana de notas: {error}"),
+        )
+    })
+}
+
+#[tauri::command]
+pub fn notes_take_meeting(app: AppHandle) -> Option<crate::notes::MeetingFocus> {
+    crate::notes::take_meeting(&app)
+}
+
+#[tauri::command]
 pub fn quit(app: AppHandle) {
     app.exit(0);
 }

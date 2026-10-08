@@ -292,6 +292,10 @@ impl Sandbox {
             .env("XDG_CONFIG_HOME", self.root.join("home/.config"))
             .env("XDG_DATA_HOME", self.root.join("home/.local/share"))
             .env("BITA_NO_HOOKS", "1")
+            .env("GIT_AUTHOR_NAME", "bita contract")
+            .env("GIT_AUTHOR_EMAIL", "contract@bita.invalid")
+            .env("GIT_COMMITTER_NAME", "bita contract")
+            .env("GIT_COMMITTER_EMAIL", "contract@bita.invalid")
             .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -399,5 +403,59 @@ fn the_new_cli_lists_atlassian_sites() {
         for field in ["site", "email", "tokenStored", "jira", "confluence", "projects", "status"] {
             assert!(site.get(field).is_some(), "sites lost {field}: {site}");
         }
+    }
+}
+
+#[test]
+fn the_new_cli_lists_project_repos() {
+    let Some(sandbox) = Sandbox::new("repos") else { return };
+    assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
+    let listed = sandbox.run(&["project", "repo", "ls", "--project", "Contrato"], None);
+    assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+    assert_eq!(listed["ok"].as_bool(), Some(true), "{listed}");
+    let repos = listed["data"]["repos"].as_array().expect("repos");
+    for repo in repos {
+        for field in ["project", "path", "slug", "source", "addedAt", "lastSeenAt", "exists"] {
+            assert!(repo.get(field).is_some(), "repos lost {field}: {repo}");
+        }
+    }
+}
+
+#[test]
+fn the_new_cli_keeps_the_history_of_a_page() {
+    let Some(sandbox) = Sandbox::new("history") else { return };
+    assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
+    let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
+    assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
+    let page_id = page["data"]["page"]["pageId"]
+        .as_i64()
+        .or_else(|| page["data"]["pageId"].as_i64())
+        .expect("the new page has an id");
+    for body in ["## Contexto\n\nPrimera versión.\n", "## Contexto\n\nSegunda versión.\n"] {
+        let markdown = sandbox.root.join("body.md");
+        fs::write(&markdown, body).expect("body");
+        let wrote = sandbox.run(
+            &["docs", "page", "write", &page_id.to_string(), "--md", &markdown.display().to_string()],
+            None,
+        );
+        assert_eq!(wrote["ok"].as_bool(), Some(true), "{wrote}");
+    }
+
+    let history = sandbox.run(&["docs", "page", "history", &page_id.to_string()], None);
+    assert_eq!(history["ok"].as_bool(), Some(true), "{history}");
+    assert_eq!(history["data"]["pageId"].as_i64(), Some(page_id), "{history}");
+    let revisions = history["data"]["revisions"].as_array().expect("revisions");
+    assert!(revisions.len() >= 2, "{history}");
+    for revision in revisions {
+        for field in ["sha", "date", "subject", "source", "reason", "entryId"] {
+            assert!(revision.get(field).is_some(), "revisions lost {field}: {revision}");
+        }
+    }
+
+    let oldest = revisions.last().and_then(|revision| revision["sha"].as_str()).expect("sha");
+    let diff = sandbox.run(&["docs", "page", "diff", &page_id.to_string(), oldest], None);
+    assert_eq!(diff["ok"].as_bool(), Some(true), "{diff}");
+    for field in ["pageId", "from", "to", "diff", "hunks"] {
+        assert!(diff["data"].get(field).is_some(), "page diff lost {field}: {diff}");
     }
 }

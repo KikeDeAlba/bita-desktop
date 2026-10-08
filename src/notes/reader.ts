@@ -7,6 +7,7 @@ import { proseControl } from './prose.ts'
 import './reader.css'
 import { assetsRelDirOf } from './drawio.ts'
 import { foldForSearch } from './markdown.ts'
+import { renderAnswers, renderProposals } from './proposals.ts'
 import {
   meetingChip,
   renderMinutes,
@@ -31,6 +32,9 @@ export interface ReaderHandlers {
   onExport: () => void
   onCompress: () => void
   onStripVideo: () => void
+  onHistory: () => void
+  onOpenPage: (pageId: number) => void
+  onMeetingChanged: () => void
 }
 
 export interface VideoActions {
@@ -81,8 +85,23 @@ export function renderReader(host: HTMLElement, state: ReaderState, handlers: Re
     onCopy: handlers.onCopy,
   }
   const query = state.query.trim()
+  const extra = {
+    project: state.page.projectName,
+    onSeek: handlers.onSeek,
+    onCopy: handlers.onCopy,
+    onLink: handlers.onOpenExternal,
+    onOpenPage: handlers.onOpenPage,
+    onChanged: handlers.onMeetingChanged,
+  }
+  const ready = meeting.load.state === 'ready' ? meeting.load.view : null
   const content =
-    meeting.tab === 'minutes' ? renderMinutes(meeting, meetingHandlers, query) : renderRoom(meeting, meetingHandlers, query)
+    meeting.tab === 'minutes'
+      ? renderMinutes(meeting, meetingHandlers, query)
+      : meeting.tab === 'proposals' && ready !== null
+        ? renderProposals(ready, extra)
+        : meeting.tab === 'answers' && ready !== null
+          ? renderAnswers(ready, extra)
+          : renderRoom(meeting, meetingHandlers, query)
   host.replaceChildren(bar(state, handlers), header(state, handlers), content)
 }
 
@@ -137,6 +156,9 @@ function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
       row.append(textAction('trash', 'Borrar video', handlers.onStripVideo))
     }
   }
+  if (page !== null && (state.meeting === null || state.meeting.tab === 'document')) {
+    row.append(textAction('history', 'Historial', handlers.onHistory))
+  }
   if (page !== null) row.append(textAction('download', 'Exportar PDF', handlers.onExport))
   if (page !== null && (state.meeting === null || state.meeting.tab === 'document')) row.append(proseControl())
 
@@ -149,7 +171,7 @@ function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
   return row
 }
 
-function textAction(glyph: 'compress' | 'trash' | 'download', label: string, onClick: () => void): HTMLButtonElement {
+function textAction(glyph: 'compress' | 'trash' | 'download' | 'history', label: string, onClick: () => void): HTMLButtonElement {
   const button = document.createElement('button')
   button.type = 'button'
   button.className = 'bar-action'

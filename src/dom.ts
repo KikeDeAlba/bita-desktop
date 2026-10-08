@@ -15,6 +15,7 @@ interface IconShape {
   view: string
   path: string
   stroke?: boolean
+  weight?: number
 }
 
 const ICONS: Record<string, IconShape> = {
@@ -138,6 +139,50 @@ const ICONS: Record<string, IconShape> = {
     stroke: true,
     path: '<path d="M8 2.2 14.6 13.6H1.4Z"/><path d="M8 6.6v3M8 11.6v.2"/>',
   },
+  question: {
+    view: '0 0 24 24',
+    stroke: true,
+    weight: 2,
+    path: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  },
+  spinner: { view: '0 0 24 24', stroke: true, weight: 2.2, path: '<path d="M21 12a9 9 0 1 1-6.22-8.56"/>' },
+  send: {
+    view: '0 0 24 24',
+    stroke: true,
+    weight: 2,
+    path: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>',
+  },
+  eyeOff: {
+    view: '0 0 24 24',
+    stroke: true,
+    weight: 2,
+    path: '<path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.53 13.53 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><path d="M2 2l20 20"/>',
+  },
+  minus: { view: '0 0 24 24', stroke: true, weight: 2, path: '<path d="M5 12h14"/>' },
+  code: { view: '0 0 24 24', stroke: true, weight: 2, path: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>' },
+  commit: {
+    view: '0 0 24 24',
+    stroke: true,
+    weight: 2,
+    path: '<circle cx="12" cy="12" r="4"/><path d="M1.05 12H7M17.01 12h5.95"/>',
+  },
+  keyboard: {
+    view: '0 0 24 24',
+    stroke: true,
+    weight: 2,
+    path: '<rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8"/>',
+  },
+  bars: { view: '0 0 24 24', stroke: true, weight: 2.2, path: '<path d="M2 12h2M6 8v8M10 5v14M14 9v6M18 7v10M22 12h-2"/>' },
+  history: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M2.6 8a5.4 5.4 0 1 0 1.6-3.8L2.6 5.8"/><path d="M2.6 2.8v3h3M8 5.2V8l2 1.2"/>',
+  },
+  edit: {
+    view: '0 0 16 16',
+    stroke: true,
+    path: '<path d="M10.6 2.8l2.6 2.6-7.6 7.6H3v-2.6Z"/>',
+  },
   more: {
     view: '0 0 16 16',
     path: '<circle cx="3.6" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="12.4" cy="8" r="1.2" fill="currentColor"/>',
@@ -154,7 +199,7 @@ export function icon(name: keyof typeof ICONS, size = 12): SVGSVGElement {
   if (shape?.stroke === true) {
     svg.setAttribute('fill', 'none')
     svg.setAttribute('stroke', 'currentColor')
-    svg.setAttribute('stroke-width', '1.5')
+    svg.setAttribute('stroke-width', String(shape.weight ?? 1.5))
     svg.setAttribute('stroke-linecap', 'round')
     svg.setAttribute('stroke-linejoin', 'round')
   }

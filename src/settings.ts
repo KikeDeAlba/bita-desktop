@@ -1,5 +1,5 @@
 import { describeProblem, installCli, quit, type Check, type Report } from './bita.ts'
-import { element } from './dom.ts'
+import { element, icon } from './dom.ts'
 
 const MARKS: Record<Check['health'], string> = {
   ok: '✓',
@@ -27,6 +27,7 @@ export function renderSettings(
   report: Report,
   onDone: () => void,
   onReload: () => void,
+  onLive: () => void,
 ): void {
   view.replaceChildren()
 
@@ -79,6 +80,18 @@ export function renderSettings(
 
     view.append(install, log)
   }
+
+  const live = document.createElement('button')
+  live.type = 'button'
+  live.className = 'settings-link'
+  live.append(
+    icon('question', 14),
+    element('span', 'settings-link-title', 'Asistente de reunión'),
+    element('span', 'settings-link-note', 'en vivo y al cerrar'),
+    icon('chevronRight', 13),
+  )
+  live.addEventListener('click', onLive)
+  view.append(live)
 
   const close = element('button', 'ghost-button wide', 'Volver') as HTMLButtonElement
   close.type = 'button'
