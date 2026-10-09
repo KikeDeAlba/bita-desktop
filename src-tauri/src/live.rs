@@ -345,8 +345,12 @@ pub fn shortcut_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     use tauri_plugin_global_shortcut::{Builder, ShortcutState};
     Builder::new()
         .with_handler(|app, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                shortcut_fired(app);
+            if event.state != ShortcutState::Pressed {
+                return;
+            }
+            let fired = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shortcut_fired(app)));
+            if fired.is_err() {
+                eprintln!("bita: the meeting assistant shortcut failed");
             }
         })
         .build()
