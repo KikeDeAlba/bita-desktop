@@ -699,3 +699,8 @@
 .live-body:has(.live-hint) + .live-foot {
   border-top: none;
 }
+
+.live-auto--manual {
+  border-color: var(--elev);
+  color: var(--fg-mute);
+}

@@ -7,7 +7,7 @@ export default defineConfig({
   build: {
     target: 'safari18',
     rollupOptions: {
-      input: { index: 'index.html', notas: 'notas.html', live: 'live.html' },
+      input: { index: 'index.html', notas: 'notas.html', live: 'live.html', 'live-wide': 'live-wide.html' },
     },
   },
   server: {

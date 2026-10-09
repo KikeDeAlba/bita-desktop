@@ -10,7 +10,6 @@ pub const FOCUS_EVENT: &str = "bita://notes-focus";
 pub const STALE_EVENT: &str = "bita://docs-changed";
 pub const MEETING_EVENT: &str = "bita://notes-meeting";
 
-const KEEP_ACCESSORY_ENV: &str = "BITA_KEEP_ACCESSORY";
 const SKIP_ON_START_ENV: &str = "BITA_NO_OPEN_NOTES";
 const WIDTH: f64 = 1280.0;
 const HEIGHT: f64 = 820.0;
@@ -18,14 +17,14 @@ const MIN_WIDTH: f64 = 720.0;
 const MIN_HEIGHT: f64 = 420.0;
 const SCREEN_SHARE: f64 = 0.9;
 
-fn fit(wanted: f64, available: Option<f64>, minimum: f64) -> f64 {
+pub fn fit(wanted: f64, available: Option<f64>, minimum: f64) -> f64 {
     match available {
         Some(space) if space > 0.0 => wanted.min(space * SCREEN_SHARE).max(minimum),
         _ => wanted,
     }
 }
 
-fn initial_size(app: &AppHandle) -> (f64, f64) {
+pub fn initial_size(app: &AppHandle, wanted: (f64, f64), minimum: (f64, f64)) -> (f64, f64) {
     let screen = app.primary_monitor().ok().flatten().map(|monitor| {
         let scale = monitor.scale_factor();
         let area = monitor.work_area();
@@ -35,8 +34,8 @@ fn initial_size(app: &AppHandle) -> (f64, f64) {
         )
     });
     (
-        fit(WIDTH, screen.map(|(width, _)| width), MIN_WIDTH),
-        fit(HEIGHT, screen.map(|(_, height)| height), MIN_HEIGHT),
+        fit(wanted.0, screen.map(|(width, _)| width), minimum.0),
+        fit(wanted.1, screen.map(|(_, height)| height), minimum.1),
     )
 }
 
@@ -117,14 +116,14 @@ pub fn open(app: &AppHandle, entry_id: Option<i64>) -> tauri::Result<()> {
         }
     };
 
-    regular_activation(app);
+    crate::activation::showing(app);
     window.show()?;
     window.set_focus()?;
     Ok(())
 }
 
 fn build(app: &AppHandle) -> tauri::Result<WebviewWindow> {
-    let (width, height) = initial_size(app);
+    let (width, height) = initial_size(app, (WIDTH, HEIGHT), (MIN_WIDTH, MIN_HEIGHT));
     let builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("notas.html".into()))
         .title("Notas de bita")
         .inner_size(width, height)
@@ -154,8 +153,8 @@ fn wire(app: &AppHandle, window: &WebviewWindow) {
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
+            crate::activation::hiding(&handle, LABEL);
             let _ = target.hide();
-            accessory_activation(&handle);
         }
     });
 }
@@ -169,36 +168,6 @@ pub fn mark_stale(app: &AppHandle) {
         let _ = app.emit(STALE_EVENT, ());
     }
 }
-
-#[cfg(target_os = "macos")]
-fn regular_activation(app: &AppHandle) {
-    if env::var_os(KEEP_ACCESSORY_ENV).is_some() {
-        return;
-    }
-    set_activation(app, tauri::ActivationPolicy::Regular);
-}
-
-#[cfg(target_os = "macos")]
-fn accessory_activation(app: &AppHandle) {
-    if env::var_os(KEEP_ACCESSORY_ENV).is_some() {
-        return;
-    }
-    set_activation(app, tauri::ActivationPolicy::Accessory);
-}
-
-#[cfg(target_os = "macos")]
-fn set_activation(app: &AppHandle, policy: tauri::ActivationPolicy) {
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        let _ = handle.set_activation_policy(policy);
-    });
-}
-
-#[cfg(not(target_os = "macos"))]
-fn regular_activation(_app: &AppHandle) {}
-
-#[cfg(not(target_os = "macos"))]
-fn accessory_activation(_app: &AppHandle) {}
 
 #[cfg(test)]
 mod tests {
