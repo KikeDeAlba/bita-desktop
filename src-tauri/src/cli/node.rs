@@ -39,6 +39,25 @@ pub fn home() -> Option<PathBuf> {
     env::var_os("HOME").map(PathBuf::from)
 }
 
+pub fn identity() -> Vec<(&'static str, std::ffi::OsString)> {
+    identity_from(env::var_os("USER"), env::var_os("LOGNAME"), home())
+}
+
+fn identity_from(
+    user: Option<std::ffi::OsString>,
+    logname: Option<std::ffi::OsString>,
+    home: Option<PathBuf>,
+) -> Vec<(&'static str, std::ffi::OsString)> {
+    let user = user
+        .filter(|value| !value.is_empty())
+        .or_else(|| logname.clone().filter(|value| !value.is_empty()))
+        .or_else(|| home.and_then(|path| path.file_name().map(|name| name.to_os_string())));
+    match user {
+        Some(user) => vec![("USER", user.clone()), ("LOGNAME", logname.filter(|value| !value.is_empty()).unwrap_or(user))],
+        None => Vec::new(),
+    }
+}
+
 fn candidates() -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = Vec::new();
 
@@ -111,6 +130,18 @@ fn parse_version(name: &str) -> Option<Vec<u32>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn identity_falls_back_to_the_home_folder_name() {
+        let found = super::identity_from(None, None, Some(std::path::PathBuf::from("/Users/someone")));
+        assert_eq!(found, vec![("USER", "someone".into()), ("LOGNAME", "someone".into())]);
+    }
+
+    #[test]
+    fn identity_keeps_the_user_that_is_set() {
+        let found = super::identity_from(Some("ana".into()), None, Some(std::path::PathBuf::from("/Users/other")));
+        assert_eq!(found, vec![("USER", "ana".into()), ("LOGNAME", "ana".into())]);
+    }
+
     use super::parse_version;
 
     #[test]
