@@ -1,3 +1,4 @@
+mod activation;
 mod ask;
 mod atlassian_cmd;
 mod cli;
@@ -8,6 +9,7 @@ mod model;
 mod notes;
 mod media;
 mod live;
+mod live_wide;
 mod meeting;
 mod notes_cmd;
 mod panel;
@@ -109,6 +111,9 @@ fn main() {
             live::recap_config_set,
             live::live_shortcut_set,
             live::open_source_file,
+            live::live_transcript_full,
+            live::live_mode_set,
+            live::live_open_settings,
             proposals::docs_branch_diff,
             proposals::page_history,
             proposals::page_diff,
@@ -120,8 +125,10 @@ fn main() {
             commands::quit
         ])
         .on_menu_event(|app, event| {
-            if event.id().as_ref() == menu::LIVE {
-                live::toggle(app);
+            match event.id().as_ref() {
+                menu::LIVE => live::toggle(app),
+                menu::LIVE_WIDE => live::open_wide(app),
+                _ => {}
             }
         })
         .setup(|app| {

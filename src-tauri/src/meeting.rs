@@ -68,7 +68,7 @@ pub struct VideoInfo {
     pub original_bytes: u64,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Segment {
     pub start_ms: i64,

@@ -1,7 +1,7 @@
 export interface SashSpec {
   handle: HTMLElement
   root: HTMLElement
-  variable: '--rail-open' | '--aside-open'
+  variable: '--rail-open' | '--aside-open' | '--questions-open' | '--transcript-open'
   side: 'left' | 'right'
   storageKey: string
   initial: number

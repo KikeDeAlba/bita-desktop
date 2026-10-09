@@ -1,159 +1,38 @@
-import {
-  backlogAdd,
-  copyText,
-  describeProblem,
-  liveAsk,
-  liveHide,
-  liveSources,
-  liveState,
-  onLiveAnswer,
-  onLiveState,
-  onLiveTranscript,
-  openExternal,
-  openNotes,
-  openSourceFile,
-  type AnswerSource,
-  type AskingState,
-  type LiveAnswer,
-  type LiveView,
-  type MeetingSegment,
-  type StreamEvent,
-} from './bita.ts'
+import { liveHide, liveModeSet, liveSources, type AnswerSource, type LiveAnswer } from './bita.ts'
 import { element, icon, must } from './dom.ts'
-import { renderMarkdown } from './notes/markdown.ts'
+import {
+  askedClock,
+  autoBadge,
+  backlogButton,
+  delayLabel,
+  elapsedLabel,
+  markdown,
+  sourceChip,
+  transcriptLine,
+  type SourceActions,
+} from './live/render.ts'
+import { Session } from './live/session.ts'
 import { shortcutLabel } from './shortcut.ts'
 
-interface Current {
-  askId: number
-  question: string
-  progress: string | null
-  text: string
-  sources: AnswerSource[]
-  done: LiveAnswer | null
-  error: { code: string; message: string } | null
-}
-
-const CHANNEL_LABEL: Record<string, string> = { mic: 'Sala', system: 'Remotos' }
 const COPIED_MS = 1400
-const LANDED_SLACK_MS = 5000
-const ERROR_TEXT: Record<string, string> = {
-  NOT_RECORDING: 'No se está grabando ninguna reunión.',
-  NO_ACTIVE: 'No se está grabando ninguna reunión.',
-  ASK_BUSY: 'Ya se está respondiendo otra pregunta. Espera a que termine e inténtalo de nuevo.',
-}
 
 const root = must<HTMLElement>('#live')
 
-let view: LiveView = {
-  active: null,
-  title: null,
-  entryId: null,
-  project: null,
-  transcript: [],
-  answers: [],
-  asking: false,
-  pendingAsk: null,
-  shortcut: 'Ctrl+Alt+Space',
-  visible: true,
-}
-let current: Current | null = null
-let watched: AskingState | null = null
-let expanded: string | null = null
 let repoCount: number | null = null
 let sourcesFor: string | null = null
 let draft = ''
-let backlogged = new Set<string>()
-let backlogBusy = new Set<string>()
 let notice: string | null = null
 let noticeTimer = 0
 
-function clockOf(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const hours = Math.floor(total / 3600)
-  const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
-  const seconds = String(total % 60).padStart(2, '0')
-  return hours > 0 ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`
-}
-
-function elapsedLabel(): string {
-  const started = view.active?.startedAt
-  if (started === null || started === undefined) return ''
-  const since = Date.now() - new Date(started).getTime()
-  if (!Number.isFinite(since)) return ''
-  const total = Math.max(0, Math.floor(since / 1000))
-  const hours = String(Math.floor(total / 3600)).padStart(2, '0')
-  const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, '0')
-  const seconds = String(total % 60).padStart(2, '0')
-  return `${hours}:${minutes}:${seconds}`
-}
-
-function delayLabel(): string | null {
-  const started = view.active?.startedAt
-  const last = view.transcript.at(-1)
-  if (started === null || started === undefined || last === undefined) return null
-  const lag = Math.round((Date.now() - new Date(started).getTime() - last.endMs) / 1000)
-  if (!Number.isFinite(lag) || lag < 0) return null
-  return `~${lag} s de retraso`
-}
-
-function askedClock(answer: LiveAnswer): string {
-  const started = view.active?.startedAt
-  if (started === null || started === undefined) return answer.askedAt.slice(11, 16)
-  const offset = new Date(answer.askedAt).getTime() - new Date(started).getTime()
-  return Number.isFinite(offset) ? clockOf(offset) : answer.askedAt.slice(11, 16)
-}
-
-function manualStreaming(): boolean {
-  return current !== null && current.done === null && current.error === null
-}
-
-function sameQuestion(left: string, right: string): boolean {
-  return left.trim().toLocaleLowerCase('es') === right.trim().toLocaleLowerCase('es')
-}
-
-function landed(pending: AskingState): LiveAnswer | undefined {
-  const question = pending.question
-  if (question === null) return undefined
-  const started = pending.startedAt === null ? Number.NaN : new Date(pending.startedAt).getTime()
-  return view.answers.findLast((answer) => {
-    if (answer.auto !== true || !sameQuestion(answer.question, question)) return false
-    if (!Number.isFinite(started)) return true
-    const asked = new Date(answer.askedAt).getTime()
-    return !Number.isFinite(asked) || asked >= started - LANDED_SLACK_MS
-  })
-}
-
-function detectedPending(): AskingState | null {
-  const pending = view.pendingAsk
-  if (pending === null || !pending.auto || pending.question === null) return null
-  if (manualStreaming() || landed(pending) !== undefined) return null
-  return pending
-}
-
-function followDetected(): void {
-  const pending = detectedPending()
-  if (pending !== null) {
-    if (watched === null || watched.startedAt !== pending.startedAt || watched.question !== pending.question) {
-      watched = pending
-      current = null
-      expanded = null
-    }
-    return
-  }
-  if (watched === null) return
-  const answer = landed(watched)
-  watched = null
-  if (answer !== undefined && !manualStreaming()) {
-    current = null
-    expanded = answer.id
-  }
-}
-
-function autoBadge(): HTMLElement {
-  const badge = element('span', 'live-auto', 'Detectada')
-  badge.title = 'El asistente detectó la pregunta en la conversación'
-  return badge
-}
+const session = new Session({
+  paint,
+  flash,
+  reloaded: () => {
+    void loadSources()
+  },
+})
+const actions: SourceActions = { copy: (text) => session.copy(text), fail: flash }
+const copy = (text: string): void => session.copy(text)
 
 function flash(message: string): void {
   notice = message
@@ -165,25 +44,29 @@ function flash(message: string): void {
   paint()
 }
 
-function copy(text: string): void {
-  void copyText(text)
-    .then(() => flash('Copiado'))
-    .catch(() => flash('No se pudo copiar'))
-}
-
 function header(): HTMLElement {
+  const view = session.view
   const bar = element('header', 'live-bar')
   bar.setAttribute('data-tauri-drag-region', '')
   const dot = element('span', view.active === null ? 'live-dot live-dot--idle' : 'live-dot')
   const title = element('span', 'live-title', view.title ?? (view.active === null ? 'Asistente de reunión' : 'Reunión en curso'))
   title.setAttribute('data-tauri-drag-region', '')
-  const clock = element('span', 'live-clock', elapsedLabel())
+  const clock = element('span', 'live-clock', elapsedLabel(view.active?.startedAt))
   clock.dataset['clock'] = 'meeting'
   const spacer = element('span', 'spacer')
   spacer.setAttribute('data-tauri-drag-region', '')
   const badge = element('span', 'live-private')
   badge.title = 'Esta ventana no aparece cuando compartes pantalla'
   badge.append(icon('eyeOff', 12), element('span', '', 'Privada'))
+  const widen = document.createElement('button')
+  widen.type = 'button'
+  widen.className = 'live-icon'
+  widen.title = 'Ventana amplia'
+  widen.setAttribute('aria-label', 'Ampliar a ventana amplia')
+  widen.append(icon('expand', 14))
+  widen.addEventListener('click', () => {
+    void liveModeSet('wide')
+  })
   const hide = document.createElement('button')
   hide.type = 'button'
   hide.className = 'live-icon'
@@ -192,30 +75,20 @@ function header(): HTMLElement {
   hide.addEventListener('click', () => {
     void liveHide()
   })
-  bar.append(dot, title, clock, spacer, badge, hide)
+  bar.append(dot, title, clock, spacer, badge, widen, hide)
   return bar
 }
 
-function transcriptLine(segment: MeetingSegment, now: boolean): HTMLElement {
-  const row = element('div', now ? 'live-line live-line--now' : 'live-line')
-  row.append(element('span', 'live-stamp', clockOf(segment.startMs)))
-  const text = element('span', 'live-said')
-  if (view.active?.mode !== 'in-person') {
-    text.append(element('b', `live-who live-who--${segment.channel}`, CHANNEL_LABEL[segment.channel] ?? segment.channel), ' ')
-  }
-  text.append(segment.text)
-  row.append(text)
-  return row
-}
-
 function transcriptPanel(full: boolean): HTMLElement {
+  const view = session.view
+  const current = session.current
   const section = element('section', full ? 'live-tail live-tail--full' : 'live-tail')
   section.setAttribute('aria-label', 'Transcripción en vivo')
   const settled = current !== null && (current.done !== null || current.error !== null)
   if (full) {
     const head = element('div', 'live-label')
     head.append(icon('bars', 11), element('span', '', 'TRANSCRIPCIÓN EN VIVO'), element('span', 'spacer'))
-    const delay = delayLabel()
+    const delay = delayLabel(view.active?.startedAt, view.transcript)
     if (delay !== null) head.append(element('span', 'live-delay', delay))
     section.append(head)
   } else if (!settled) {
@@ -231,7 +104,7 @@ function transcriptPanel(full: boolean): HTMLElement {
   const shown = full ? lines : lines.slice(settled ? -1 : -3)
   const list = element('div', 'live-lines')
   shown.forEach((segment, index) => {
-    list.append(transcriptLine(segment, !full && index === shown.length - 1))
+    list.append(transcriptLine(segment, !full && index === shown.length - 1, view.active?.mode))
   })
   section.append(list)
   if (full) {
@@ -243,92 +116,6 @@ function transcriptPanel(full: boolean): HTMLElement {
     })
   }
   return section
-}
-
-function sourceChip(source: AnswerSource): HTMLElement {
-  const kind = source.kind === 'page' || source.kind === 'file' || source.kind === 'commit' ? source.kind : 'file'
-  const chip = document.createElement('button')
-  chip.type = 'button'
-  chip.className = `live-source live-source--${kind}`
-  chip.append(icon(kind === 'page' ? 'doc' : kind === 'commit' ? 'commit' : 'code', 11), element('span', '', source.label))
-  if (kind === 'page' && source.pageId !== undefined) {
-    const pageId = source.pageId
-    chip.title = 'Abrir la página en las notas'
-    chip.addEventListener('click', () => {
-      void openNotes(pageId).catch((error: unknown) => flash(describeProblem(error).message))
-    })
-  } else if (kind === 'file' && source.path !== undefined) {
-    const path = source.path
-    chip.title = source.line === undefined ? path : `${path}:${source.line}`
-    chip.addEventListener('click', () => {
-      void openSourceFile(path).catch((error: unknown) => flash(describeProblem(error).message))
-    })
-  } else if (kind === 'commit') {
-    const sha = source.sha ?? source.label
-    chip.title = 'Copiar el commit'
-    chip.addEventListener('click', () => copy(sha))
-  } else {
-    chip.disabled = true
-  }
-  return chip
-}
-
-function decorateCode(fragment: DocumentFragment): void {
-  for (const pre of fragment.querySelectorAll<HTMLElement>('pre.md-code')) {
-    const text = pre.textContent ?? ''
-    const wrap = element('div', 'live-code')
-    pre.replaceWith(wrap)
-    const button = document.createElement('button')
-    button.type = 'button'
-    button.className = 'live-code-copy'
-    button.setAttribute('aria-label', 'Copiar comando')
-    button.append(icon('copy', 13))
-    button.addEventListener('click', () => copy(text))
-    wrap.append(pre, button)
-  }
-}
-
-function markdown(text: string, streaming: boolean): HTMLElement {
-  const body = element('div', 'live-md')
-  const fragment = renderMarkdown(text, {
-    onCopy: copy,
-    onLink: (url) => {
-      void openExternal(url).catch(() => undefined)
-    },
-  })
-  decorateCode(fragment)
-  body.append(fragment)
-  if (streaming) {
-    const caret = element('span', 'live-caret')
-    const last = body.lastElementChild
-    if (last !== null && last.tagName === 'P') last.append(caret)
-    else body.append(caret)
-  }
-  return body
-}
-
-function backlogButton(answer: LiveAnswer): HTMLElement {
-  const button = document.createElement('button')
-  button.type = 'button'
-  button.className = 'live-backlog'
-  const done = backlogged.has(answer.id)
-  const busy = backlogBusy.has(answer.id)
-  button.disabled = done || busy
-  button.append(icon(done ? 'check' : 'inbox', 11), element('span', '', done ? 'En el backlog' : busy ? 'Guardando…' : 'Al backlog'))
-  button.addEventListener('click', () => {
-    backlogBusy.add(answer.id)
-    paint()
-    void backlogAdd('pending', answer.question, answer.answer, null, view.project)
-      .then(() => {
-        backlogged.add(answer.id)
-      })
-      .catch((error: unknown) => flash(describeProblem(error).message))
-      .finally(() => {
-        backlogBusy.delete(answer.id)
-        paint()
-      })
-  })
-  return button
 }
 
 function card(question: string, state: {
@@ -378,18 +165,21 @@ function card(question: string, state: {
     missing.append(icon('warning', 14))
     const words = element('div', 'live-missing-text')
     words.append(element('span', 'live-missing-title', 'No está documentado'))
-    if (state.answer.answer.trim().length > 0) words.append(markdown(state.answer.answer, false))
+    if (state.answer.answer.trim().length > 0) words.append(markdown(state.answer.answer, false, copy))
     missing.append(words)
     box.append(missing)
   } else if (state.text.length > 0 || state.answer !== null) {
-    box.append(markdown(state.answer?.answer ?? state.text, streaming))
+    box.append(markdown(state.answer?.answer ?? state.text, streaming, copy))
   }
 
   const sources = state.answer?.sources ?? state.sources
   if (sources.length > 0 || (!found && state.answer !== null)) {
     const row = element('div', found ? 'live-sources' : 'live-sources live-sources--plain')
-    for (const source of sources) row.append(sourceChip(source))
-    if (!found && state.answer !== null) row.append(element('span', 'spacer'), backlogButton(state.answer))
+    for (const source of sources) row.append(sourceChip(source, actions))
+    if (!found && state.answer !== null) {
+      const answer = state.answer
+      row.append(element('span', 'spacer'), backlogButton(session.backlogState(answer), () => session.toBacklog(answer)))
+    }
     box.append(row)
   }
   return box
@@ -401,7 +191,7 @@ function collapsed(answer: LiveAnswer): HTMLElement {
   button.className = 'live-earlier'
   const count = answer.sources.length
   button.append(
-    element('span', 'live-stamp', askedClock(answer)),
+    element('span', 'live-stamp', askedClock(answer, session.view.active?.startedAt)),
     element('span', 'live-earlier-question', answer.question),
     ...(answer.auto === true ? [autoBadge()] : []),
     element(
@@ -411,14 +201,15 @@ function collapsed(answer: LiveAnswer): HTMLElement {
     ),
   )
   button.addEventListener('click', () => {
-    expanded = answer.id
-    current = null
+    session.focus = answer.id
+    session.current = null
     paint()
   })
   return button
 }
 
 function hintCard(): HTMLElement {
+  const view = session.view
   const box = element('div', 'live-hint')
   box.append(icon('keyboard', 14))
   const words = element('div', 'live-hint-text')
@@ -443,10 +234,12 @@ function hintCard(): HTMLElement {
 }
 
 function answersPanel(): HTMLElement {
+  const view = session.view
+  const current = session.current
   const list = element('main', 'live-answers')
   const doneId = current?.done?.id ?? null
-  const detected = current === null ? detectedPending() : null
-  const shownId = detected !== null ? null : current === null ? (expanded ?? view.answers.at(-1)?.id ?? null) : doneId
+  const detected = current === null ? session.detectedPending() : null
+  const shownId = detected !== null ? null : current === null ? (session.focus ?? view.answers.at(-1)?.id ?? null) : doneId
   if (detected !== null) {
     list.append(card(detected.question ?? '', { progress: null, text: '', sources: [], answer: null, error: null, auto: true }))
   } else if (current !== null) {
@@ -479,6 +272,7 @@ function answersPanel(): HTMLElement {
 }
 
 function askBox(): HTMLElement {
+  const view = session.view
   const foot = element('footer', 'live-foot')
   const form = document.createElement('form')
   form.className = 'live-ask'
@@ -507,7 +301,7 @@ function askBox(): HTMLElement {
     const question = draft.trim()
     if (question.length === 0) return
     draft = ''
-    ask(question)
+    session.ask(question)
   })
   const hint = element('div', 'live-shortcut')
   hint.append(element('span', 'live-kbd', shortcutLabel(view.shortcut)), element('span', '', 'responde lo último que se preguntó'))
@@ -516,57 +310,9 @@ function askBox(): HTMLElement {
   return foot
 }
 
-function ask(question: string | null): void {
-  void liveAsk(question)
-    .then((askId) => {
-      if (current === null || current.askId < askId) start(askId, question ?? '')
-    })
-    .catch((error: unknown) => {
-      const problem = describeProblem(error)
-      current = { askId: 0, question: question ?? '', progress: null, text: '', sources: [], done: null, error: { code: 'FAILED', message: problem.message } }
-      paint()
-    })
-}
-
-function start(askId: number, question: string): void {
-  current = { askId, question, progress: null, text: '', sources: [], done: null, error: null }
-  expanded = null
-  watched = null
-  paint()
-}
-
-function apply(askId: number, event: StreamEvent): void {
-  if (askId === 0) {
-    if (event.type === 'error') {
-      current = { askId: 0, question: '', progress: null, text: '', sources: [], done: null, error: { code: event.code, message: event.message } }
-      paint()
-    }
-    return
-  }
-  if (current === null || current.askId < askId) start(askId, '')
-  if (current === null || current.askId !== askId) return
-  if (event.type === 'question') current.question = event.text
-  if (event.type === 'progress') current.progress = event.text
-  if (event.type === 'delta') {
-    current.text += event.text
-    current.progress = null
-  }
-  if (event.type === 'source') current.sources = [...current.sources, event.source]
-  if (event.type === 'done') {
-    current.done = event.answer
-    current.question = event.answer.question
-    if (!view.answers.some((answer) => answer.id === event.answer.id)) view.answers = [...view.answers, event.answer]
-  }
-  if (event.type === 'error') {
-    if (event.code === 'CANCELLED') return
-    current.error = { code: event.code, message: ERROR_TEXT[event.code] ?? event.message }
-  }
-  paint()
-}
-
 function paint(): void {
   const answers = element('div', 'live-body')
-  const idle = current === null && view.answers.length === 0 && detectedPending() === null
+  const idle = session.current === null && session.view.answers.length === 0 && session.detectedPending() === null
   if (idle) {
     answers.append(transcriptPanel(true), hintCard())
   } else {
@@ -587,7 +333,7 @@ function paint(): void {
 }
 
 async function loadSources(): Promise<void> {
-  const project = view.project
+  const project = session.view.project
   if (project === null || project === sourcesFor) return
   sourcesFor = project
   try {
@@ -599,47 +345,18 @@ async function loadSources(): Promise<void> {
   paint()
 }
 
-async function reload(): Promise<void> {
-  const previous = view.active?.meetingId ?? null
-  try {
-    view = await liveState()
-  } catch {
-    return
-  }
-  if ((view.active?.meetingId ?? null) !== previous) {
-    current = null
-    expanded = null
-    watched = null
-    backlogged = new Set()
-  }
-  followDetected()
-  paint()
-  void loadSources()
-}
-
 function tick(): void {
+  const view = session.view
   const clock = root.querySelector<HTMLElement>('[data-clock="meeting"]')
-  if (clock !== null) clock.textContent = elapsedLabel()
+  if (clock !== null) clock.textContent = elapsedLabel(view.active?.startedAt)
   const delay = root.querySelector<HTMLElement>('.live-delay')
-  if (delay !== null) delay.textContent = delayLabel() ?? ''
+  if (delay !== null) delay.textContent = delayLabel(view.active?.startedAt, view.transcript) ?? ''
 }
 
-function boot(): void {
-  onLiveAnswer(({ askId, event }) => apply(askId, event))
-  onLiveState(() => {
-    void reload()
-  })
-  onLiveTranscript((update) => {
-    if (view.active?.meetingId !== update.meetingId) return
-    view.transcript = update.transcript
-    paint()
-  })
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') void liveHide()
-  })
-  window.setInterval(tick, 1000)
-  paint()
-  void reload()
-}
-
-boot()
+session.listen()
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') void liveHide()
+})
+window.setInterval(tick, 1000)
+paint()
+void session.reload()

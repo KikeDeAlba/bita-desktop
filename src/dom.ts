@@ -183,6 +183,24 @@ const ICONS: Record<string, IconShape> = {
     stroke: true,
     path: '<path d="M10.6 2.8l2.6 2.6-7.6 7.6H3v-2.6Z"/>',
   },
+  expand: {
+    view: '0 0 24 24',
+    stroke: true,
+    weight: 2,
+    path: '<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>',
+  },
+  shrink: {
+    view: '0 0 24 24',
+    stroke: true,
+    weight: 2,
+    path: '<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+  },
+  rotate: {
+    view: '0 0 24 24',
+    stroke: true,
+    weight: 2,
+    path: '<path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>',
+  },
   more: {
     view: '0 0 16 16',
     path: '<circle cx="3.6" cy="8" r="1.2" fill="currentColor"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/><circle cx="12.4" cy="8" r="1.2" fill="currentColor"/>',

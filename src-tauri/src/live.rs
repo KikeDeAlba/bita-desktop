@@ -13,6 +13,7 @@ use tokio::time::{interval, MissedTickBehavior};
 
 use crate::ask::{self, parse_jsonl, Answer};
 use crate::cli::node;
+use crate::live_wide;
 use crate::meeting::Segment;
 use crate::model::{Problem, ProblemKind};
 use crate::recap::{recap_call, RecapError};
@@ -21,6 +22,7 @@ use crate::state::AppState;
 pub const LABEL: &str = "live";
 pub const STATE_EVENT: &str = "bita://live-state";
 pub const TRANSCRIPT_EVENT: &str = "bita://live-transcript";
+pub const SETTINGS_EVENT: &str = "bita://live-settings";
 pub const DEFAULT_SHORTCUT: &str = "Ctrl+Alt+Space";
 
 const WIDTH: f64 = 380.0;
@@ -70,6 +72,18 @@ pub struct AskingState {
     pub question: Option<String>,
     #[serde(default)]
     pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LiveMode {
+    #[default]
+    Compact,
+    Wide,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -85,11 +99,22 @@ pub struct LiveView {
     pub pending_ask: Option<AskingState>,
     pub shortcut: String,
     pub visible: bool,
+    pub mode: LiveMode,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TranscriptUpdate {
+    pub meeting_id: String,
+    pub transcript: Vec<Segment>,
+    pub from: usize,
+    pub lines: Vec<Segment>,
+    pub total: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FullTranscript {
     pub meeting_id: String,
     pub transcript: Vec<Segment>,
 }
@@ -99,6 +124,8 @@ pub struct TranscriptUpdate {
 struct StoredSettings {
     #[serde(default)]
     shortcut: Option<String>,
+    #[serde(default)]
+    mode: Option<LiveMode>,
 }
 
 #[derive(Default)]
@@ -108,6 +135,7 @@ struct SessionInner {
     entry_id: Option<i64>,
     project: Option<String>,
     transcript: Vec<Segment>,
+    full: Vec<Segment>,
     answers: Vec<Answer>,
     pending_ask: Option<AskingState>,
     transcript_mark: Fingerprint,
@@ -190,6 +218,15 @@ pub fn tail<T: Clone>(items: &[T], count: usize) -> Vec<T> {
     items[items.len().saturating_sub(count)..].to_vec()
 }
 
+pub fn increment<T: Clone + PartialEq>(previous: &[T], lines: &[T]) -> (usize, Vec<T>) {
+    let kept = previous.len();
+    if lines.len() >= kept && lines[..kept] == *previous {
+        (kept, lines[kept..].to_vec())
+    } else {
+        (0, lines.to_vec())
+    }
+}
+
 fn state_dir_from(explicit: Option<PathBuf>, xdg: Option<PathBuf>, home: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(dir) = explicit.filter(|dir| !dir.as_os_str().is_empty()) {
         return Some(dir);
@@ -223,10 +260,14 @@ pub fn find(app: &AppHandle) -> Option<WebviewWindow> {
     app.get_webview_window(LABEL)
 }
 
-pub fn is_visible(app: &AppHandle) -> bool {
+pub fn compact_visible(app: &AppHandle) -> bool {
     find(app)
         .and_then(|window| window.is_visible().ok())
         .unwrap_or(false)
+}
+
+pub fn is_visible(app: &AppHandle) -> bool {
+    compact_visible(app) || live_wide::is_visible(app)
 }
 
 fn corner(app: &AppHandle) -> Option<(f64, f64)> {
@@ -300,20 +341,60 @@ fn float(window: &WebviewWindow) {
     let _ = window.show();
 }
 
-pub fn open_passive(app: &AppHandle) -> tauri::Result<()> {
+fn open_compact(app: &AppHandle) -> tauri::Result<()> {
     let window = match find(app) {
         Some(existing) => existing,
         None => build(app)?,
     };
     float(&window);
+    Ok(())
+}
+
+fn hide_compact(app: &AppHandle) {
+    if let Some(window) = find(app) {
+        let _ = window.hide();
+    }
+}
+
+fn open_mode(app: &AppHandle, mode: LiveMode, focus: bool) -> tauri::Result<()> {
+    match mode {
+        LiveMode::Compact => {
+            live_wide::hide(app);
+            open_compact(app)?;
+        }
+        LiveMode::Wide => {
+            hide_compact(app);
+            live_wide::open(app, focus)?;
+        }
+    }
     let _ = app.emit(STATE_EVENT, ());
     Ok(())
 }
 
+pub fn mode(app: &AppHandle) -> LiveMode {
+    stored_settings(app).mode.unwrap_or_default()
+}
+
+pub fn open_passive(app: &AppHandle) -> tauri::Result<()> {
+    open_mode(app, mode(app), false)
+}
+
+pub fn switch_mode(app: &AppHandle, wanted: LiveMode) -> Result<(), Problem> {
+    let mut settings = stored_settings(app);
+    settings.mode = Some(wanted);
+    let stored = store_settings(app, &settings);
+    open_mode(app, wanted, true)
+        .map_err(|error| Problem::new(ProblemKind::Unreadable, format!("No pude abrir el asistente: {error}")))?;
+    stored
+}
+
+pub fn open_wide(app: &AppHandle) {
+    let _ = switch_mode(app, LiveMode::Wide);
+}
+
 pub fn hide(app: &AppHandle) {
-    if let Some(window) = find(app) {
-        let _ = window.hide();
-    }
+    hide_compact(app);
+    live_wide::hide(app);
     let _ = app.emit(STATE_EVENT, ());
 }
 
@@ -477,16 +558,23 @@ fn refresh_files(app: &AppHandle) {
             .map(|text| parse_jsonl(&text))
             .unwrap_or_default();
         let kept = tail(&lines, TAIL_LINES);
-        {
+        let total = lines.len();
+        let (from, added) = {
             let mut inner = session.lock();
+            let step = increment(&inner.full, &lines);
             inner.transcript_mark = current;
             inner.transcript = kept.clone();
-        }
+            inner.full = lines;
+            step
+        };
         let _ = app.emit(
             TRANSCRIPT_EVENT,
             TranscriptUpdate {
                 meeting_id: meeting_id.clone(),
                 transcript: kept,
+                from,
+                lines: added,
+                total,
             },
         );
     }
@@ -568,6 +656,31 @@ fn view(app: &AppHandle) -> LiveView {
         pending_ask: inner.pending_ask.clone(),
         shortcut,
         visible: is_visible(app),
+        mode: mode(app),
+    }
+}
+
+#[tauri::command]
+pub fn live_transcript_full(app: AppHandle) -> Option<FullTranscript> {
+    let session = app.state::<LiveSession>();
+    let inner = session.lock();
+    let active = inner.active.as_ref()?;
+    Some(FullTranscript {
+        meeting_id: active.meeting_id.clone(),
+        transcript: inner.full.clone(),
+    })
+}
+
+#[tauri::command]
+pub fn live_mode_set(app: AppHandle, mode: LiveMode) -> Result<(), Problem> {
+    switch_mode(&app, mode)
+}
+
+#[tauri::command]
+pub fn live_open_settings(app: AppHandle) {
+    if let Some(window) = crate::panel::find(&app) {
+        crate::panel::show(&app, &window);
+        let _ = window.emit(SETTINGS_EVENT, ());
     }
 }
 
@@ -682,7 +795,9 @@ pub async fn live_shortcut_set(app: AppHandle, accelerator: String) -> Result<St
             format!("No pude usar «{wanted}»: otra app ya lo tiene ({error})."),
         ));
     }
-    store_settings(&app, &StoredSettings { shortcut: Some(wanted.clone()) })?;
+    let mut settings = stored_settings(&app);
+    settings.shortcut = Some(wanted.clone());
+    store_settings(&app, &settings)?;
     app.state::<LiveSession>().set_shortcut(&wanted);
     let _ = app.emit(STATE_EVENT, ());
     Ok(wanted)
@@ -722,7 +837,10 @@ pub async fn open_source_file(path: String) -> Result<(), Problem> {
 
 #[cfg(test)]
 mod tests {
-    use super::{config_value, openable_file, parse_active, parse_asking, parse_config, read_asking, state_dir_from, tail};
+    use super::{
+        config_value, increment, openable_file, parse_active, parse_asking, parse_config, read_asking, state_dir_from, tail,
+        LiveMode, StoredSettings,
+    };
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -825,6 +943,19 @@ mod tests {
     }
 
     #[test]
+    fn the_asking_file_may_say_when_and_who_asked() {
+        let detected = parse_asking(
+            r#"{"auto":true,"question":"¿Cuántas transacciones aguanta?","startedAt":"2026-10-09T05:41:38Z","questionMs":2452000,"channel":"system"}"#,
+        )
+        .expect("detected");
+        assert_eq!(detected.question_ms, Some(2_452_000));
+        assert_eq!(detected.channel.as_deref(), Some("system"));
+        let older = parse_asking(r#"{"auto":true,"question":"¿Y?","startedAt":"2026-10-09T05:41:38Z"}"#).expect("older");
+        assert_eq!(older.question_ms, None);
+        assert_eq!(older.channel, None);
+    }
+
+    #[test]
     fn a_missing_asking_file_means_nothing_is_being_answered() {
         let path = std::env::temp_dir().join(format!("bita-asking-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -856,6 +987,33 @@ mod tests {
         assert_eq!(tail(&[1, 2, 3, 4], 2), vec![3, 4]);
         assert_eq!(tail(&[1], 5), vec![1]);
         assert!(tail::<i32>(&[], 3).is_empty());
+    }
+
+    #[test]
+    fn the_transcript_increment_sends_only_the_new_lines() {
+        assert_eq!(increment::<i32>(&[], &[1, 2]), (0, vec![1, 2]));
+        assert_eq!(increment(&[1, 2], &[1, 2, 3, 4]), (2, vec![3, 4]));
+        assert_eq!(increment(&[1, 2], &[1, 2]), (2, vec![]));
+    }
+
+    #[test]
+    fn a_rewritten_transcript_is_sent_again_from_the_start() {
+        assert_eq!(increment(&[1, 2, 3], &[1, 2]), (0, vec![1, 2]));
+        assert_eq!(increment(&[1, 2], &[1, 9, 3]), (0, vec![1, 9, 3]));
+    }
+
+    #[test]
+    fn the_remembered_mode_defaults_to_compact_and_survives_the_shortcut() {
+        let empty: StoredSettings = serde_json::from_str("{}").expect("empty");
+        assert_eq!(empty.mode.unwrap_or_default(), LiveMode::Compact);
+        let older: StoredSettings = serde_json::from_str(r#"{"shortcut":"Ctrl+Alt+Space"}"#).expect("older");
+        assert_eq!(older.mode, None);
+        let wide: StoredSettings = serde_json::from_str(r#"{"shortcut":"Ctrl+Alt+A","mode":"wide"}"#).expect("wide");
+        assert_eq!(wide.mode, Some(LiveMode::Wide));
+        assert_eq!(wide.shortcut.as_deref(), Some("Ctrl+Alt+A"));
+        let text = serde_json::to_string(&wide).expect("serialize");
+        assert!(text.contains(r#""mode":"wide""#));
+        assert!(serde_json::from_str::<StoredSettings>(r#"{"mode":"huge"}"#).is_err());
     }
 
     #[test]

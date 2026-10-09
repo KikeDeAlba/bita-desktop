@@ -9,6 +9,7 @@ export const SYNC_FINISHED_EVENT = 'bita://confluence-synced'
 export const LIVE_ANSWER_EVENT = 'bita://live-answer'
 export const LIVE_STATE_EVENT = 'bita://live-state'
 export const LIVE_TRANSCRIPT_EVENT = 'bita://live-transcript'
+export const LIVE_SETTINGS_EVENT = 'bita://live-settings'
 export const NOTES_MEETING_EVENT = 'bita://notes-meeting'
 
 export type ProblemKind =
@@ -406,6 +407,9 @@ export interface LiveAnswer {
   found: boolean
   sources: AnswerSource[]
   auto?: boolean
+  answeredAt?: string
+  questionMs?: number
+  channel?: 'mic' | 'system' | string
 }
 
 export type StreamEvent =
@@ -432,7 +436,12 @@ export interface AskingState {
   auto: boolean
   question: string | null
   startedAt: string | null
+  questionMs?: number
+  channel?: 'mic' | 'system' | string
 }
+
+export type LiveMode = 'compact' | 'wide'
+
 
 export interface LiveView {
   active: ActiveMeeting | null
@@ -445,9 +454,18 @@ export interface LiveView {
   pendingAsk: AskingState | null
   shortcut: string
   visible: boolean
+  mode: LiveMode
 }
 
 export interface LiveTranscriptUpdate {
+  meetingId: string
+  transcript: MeetingSegment[]
+  from: number
+  lines: MeetingSegment[]
+  total: number
+}
+
+export interface LiveFullTranscript {
   meetingId: string
   transcript: MeetingSegment[]
 }
@@ -1121,6 +1139,18 @@ export function liveShortcutSet(accelerator: string): Promise<string> {
   return invoke<string>('live_shortcut_set', { accelerator })
 }
 
+export function liveTranscriptFull(): Promise<LiveFullTranscript | null> {
+  return invoke<LiveFullTranscript | null>('live_transcript_full')
+}
+
+export function liveModeSet(mode: LiveMode): Promise<void> {
+  return invoke('live_mode_set', { mode })
+}
+
+export function liveOpenSettings(): Promise<void> {
+  return invoke('live_open_settings')
+}
+
 export function openSourceFile(path: string): Promise<void> {
   return invoke('open_source_file', { path })
 }
@@ -1180,6 +1210,12 @@ export function onLiveState(handler: () => void): void {
 export function onLiveTranscript(handler: (update: LiveTranscriptUpdate) => void): void {
   void listen<LiveTranscriptUpdate>(LIVE_TRANSCRIPT_EVENT, (event) => {
     handler(event.payload)
+  })
+}
+
+export function onLiveSettings(handler: () => void): void {
+  void listen(LIVE_SETTINGS_EVENT, () => {
+    handler()
   })
 }
 
