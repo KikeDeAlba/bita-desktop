@@ -58,6 +58,8 @@ pub struct Answer {
     pub question_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -353,9 +355,21 @@ mod tests {
         assert_eq!(answers[0].answered_at, None);
         assert_eq!(answers[0].question_ms, None);
         assert_eq!(answers[0].channel, None);
+        assert_eq!(answers[0].ask_id, None);
         let text = serde_json::to_string(&answers[0]).expect("serialize");
         assert!(!text.contains("answeredAt"));
         assert!(!text.contains("questionMs"));
+        assert!(!text.contains("askId"));
+    }
+
+    #[test]
+    fn an_answer_names_the_ask_that_produced_it() {
+        let answers: Vec<Answer> = parse_jsonl(
+            r#"{"id":"a6","askId":"k-17","askedAt":"2026-10-09T05:41:38Z","question":"q","answer":"a","found":true,"auto":true}"#,
+        );
+        assert_eq!(answers[0].ask_id.as_deref(), Some("k-17"));
+        let text = serde_json::to_string(&answers[0]).expect("serialize");
+        assert!(text.contains(r#""askId":"k-17""#));
     }
 
     #[test]

@@ -36,8 +36,13 @@ const STATE_DIR_ENV: &str = "RECAP_STATE_DIR";
 const EDITOR_OPEN: &str = "/usr/bin/open";
 const AUTO_ASK_MIN_SECONDS: i64 = 10;
 const AUTO_ASK_MAX_SECONDS: i64 = 120;
+const AUTO_ASK_MIN_CONCURRENCY: i64 = 1;
+const AUTO_ASK_MAX_CONCURRENCY: i64 = 6;
+const ASKING_DIR: &str = "asking";
+const ASKING_FILE: &str = "asking.json";
 
 type Fingerprint = Option<(SystemTime, u64)>;
+type DirFingerprint = Option<Vec<(String, SystemTime, u64)>>;
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,11 +66,24 @@ pub struct LiveConfig {
     pub auto_ask: Option<bool>,
     pub auto_ask_model: Option<String>,
     pub auto_ask_min_seconds: Option<i64>,
+    pub auto_ask_concurrency: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AskPhase {
+    Queued,
+    #[default]
+    Running,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AskingState {
+pub struct PendingAsk {
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub state: AskPhase,
     #[serde(default)]
     pub auto: bool,
     #[serde(default)]
@@ -96,7 +114,7 @@ pub struct LiveView {
     pub transcript: Vec<Segment>,
     pub answers: Vec<Answer>,
     pub asking: bool,
-    pub pending_ask: Option<AskingState>,
+    pub pending_asks: Vec<PendingAsk>,
     pub shortcut: String,
     pub visible: bool,
     pub mode: LiveMode,
@@ -137,10 +155,10 @@ struct SessionInner {
     transcript: Vec<Segment>,
     full: Vec<Segment>,
     answers: Vec<Answer>,
-    pending_ask: Option<AskingState>,
+    pending_asks: Vec<PendingAsk>,
     transcript_mark: Fingerprint,
     answers_mark: Fingerprint,
-    asking_mark: Fingerprint,
+    asking_mark: Option<(DirFingerprint, Fingerprint)>,
 }
 
 #[derive(Default)]
@@ -180,17 +198,62 @@ pub fn parse_active(text: &str) -> Option<ActiveMeeting> {
     Some(active)
 }
 
-pub fn parse_asking(text: &str) -> Option<AskingState> {
-    let mut state: AskingState = serde_json::from_str(text.trim()).ok()?;
+pub fn parse_asking(text: &str) -> Option<PendingAsk> {
+    let mut state: PendingAsk = serde_json::from_str(text.trim()).ok()?;
     state.question = state
         .question
         .map(|question| question.trim().to_string())
         .filter(|question| !question.is_empty());
+    state.id = state.id.map(|id| id.trim().to_string()).filter(|id| !id.is_empty());
     Some(state)
 }
 
-pub fn read_asking(path: &Path) -> Option<AskingState> {
+pub fn read_asking(path: &Path) -> Option<PendingAsk> {
     parse_asking(&fs::read_to_string(path).ok()?)
+}
+
+fn asking_entries(dir: &Path) -> Option<Vec<PathBuf>> {
+    let mut paths: Vec<PathBuf> = fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "json") && path.is_file())
+        .collect();
+    paths.sort();
+    Some(paths)
+}
+
+pub fn read_asking_dir(dir: &Path) -> Option<Vec<PendingAsk>> {
+    let mut asks: Vec<PendingAsk> = asking_entries(dir)?
+        .iter()
+        .filter_map(|path| {
+            let mut ask = read_asking(path)?;
+            if ask.id.is_none() {
+                ask.id = path.file_stem().map(|stem| stem.to_string_lossy().into_owned());
+            }
+            Some(ask)
+        })
+        .collect();
+    asks.sort_by(|left, right| left.started_at.cmp(&right.started_at).then_with(|| left.id.cmp(&right.id)));
+    Some(asks)
+}
+
+pub fn read_pending_asks(live_dir: &Path) -> Vec<PendingAsk> {
+    read_asking_dir(&live_dir.join(ASKING_DIR))
+        .unwrap_or_else(|| read_asking(&live_dir.join(ASKING_FILE)).into_iter().collect())
+}
+
+fn dir_fingerprint(dir: &Path) -> DirFingerprint {
+    let entries = asking_entries(dir)?;
+    Some(
+        entries
+            .iter()
+            .filter_map(|path| {
+                let meta = fs::metadata(path).ok()?;
+                Some((path.file_name()?.to_string_lossy().into_owned(), meta.modified().ok()?, meta.len()))
+            })
+            .collect(),
+    )
 }
 
 pub fn parse_config(data: &Value) -> Option<LiveConfig> {
@@ -211,6 +274,7 @@ pub fn parse_config(data: &Value) -> Option<LiveConfig> {
             .and_then(Value::as_str)
             .map(str::to_string),
         auto_ask_min_seconds: settings.get("live.autoAskMinSeconds").and_then(Value::as_i64),
+        auto_ask_concurrency: settings.get("live.autoAskConcurrency").and_then(Value::as_i64),
     })
 }
 
@@ -547,7 +611,7 @@ fn refresh_files(app: &AppHandle) {
             active.meeting_id.clone(),
             inner.transcript_mark,
             inner.answers_mark,
-            inner.asking_mark,
+            inner.asking_mark.clone(),
         )
     };
 
@@ -593,15 +657,14 @@ fn refresh_files(app: &AppHandle) {
         let _ = app.emit(STATE_EVENT, ());
     }
 
-    let asking_path = dir.join("asking.json");
-    let current = fingerprint(&asking_path);
+    let current = Some((dir_fingerprint(&dir.join(ASKING_DIR)), fingerprint(&dir.join(ASKING_FILE))));
     if current != asking_mark {
-        let pending = read_asking(&asking_path);
+        let pending = read_pending_asks(&dir);
         let changed = {
             let mut inner = session.lock();
             inner.asking_mark = current;
-            let changed = inner.pending_ask != pending;
-            inner.pending_ask = pending;
+            let changed = inner.pending_asks != pending;
+            inner.pending_asks = pending;
             changed
         };
         if changed {
@@ -653,7 +716,7 @@ fn view(app: &AppHandle) -> LiveView {
         transcript: inner.transcript.clone(),
         answers: inner.answers.clone(),
         asking: ask::is_asking(),
-        pending_ask: inner.pending_ask.clone(),
+        pending_asks: inner.pending_asks.clone(),
         shortcut,
         visible: is_visible(app),
         mode: mode(app),
@@ -759,6 +822,16 @@ pub fn config_value(key: &str, value: &Value) -> Result<String, Problem> {
                     format!("live.autoAskMinSeconds va de {AUTO_ASK_MIN_SECONDS} a {AUTO_ASK_MAX_SECONDS} segundos."),
                 )
             }),
+        "live.autoAskConcurrency" => value
+            .as_i64()
+            .filter(|count| (AUTO_ASK_MIN_CONCURRENCY..=AUTO_ASK_MAX_CONCURRENCY).contains(count))
+            .map(|count| count.to_string())
+            .ok_or_else(|| {
+                Problem::new(
+                    ProblemKind::CliFailed,
+                    format!("live.autoAskConcurrency va de {AUTO_ASK_MIN_CONCURRENCY} a {AUTO_ASK_MAX_CONCURRENCY} respuestas a la vez."),
+                )
+            }),
         "live.assistModel" | "live.autoAskModel" => Ok(match value {
             Value::Null => "null".into(),
             Value::String(text) if text.trim().is_empty() => "null".into(),
@@ -838,8 +911,8 @@ pub async fn open_source_file(path: String) -> Result<(), Problem> {
 #[cfg(test)]
 mod tests {
     use super::{
-        config_value, increment, openable_file, parse_active, parse_asking, parse_config, read_asking, state_dir_from, tail,
-        LiveMode, StoredSettings,
+        config_value, increment, openable_file, parse_active, parse_asking, parse_config, read_asking, read_asking_dir,
+        read_pending_asks, state_dir_from, tail, AskPhase, LiveMode, StoredSettings,
     };
     use serde_json::json;
     use std::path::PathBuf;
@@ -921,6 +994,93 @@ mod tests {
         assert_eq!(config.auto_ask, Some(false));
         assert_eq!(config.auto_ask_model.as_deref(), Some("haiku"));
         assert_eq!(config.auto_ask_min_seconds, Some(30));
+        assert_eq!(config.auto_ask_concurrency, None);
+    }
+
+    #[test]
+    fn the_parallel_answer_count_is_read_when_recap_has_it() {
+        let data = json!({"settings": {"live.autoAsk": true, "live.autoAskConcurrency": 3}});
+        assert_eq!(parse_config(&data).expect("config").auto_ask_concurrency, Some(3));
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("bita-live-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch");
+        dir
+    }
+
+    #[test]
+    fn every_file_in_the_asking_directory_is_a_pending_answer() {
+        let live = scratch("asking-dir");
+        let dir = live.join("asking");
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(
+            dir.join("b2.json"),
+            r#"{"id":"b2","auto":true,"question":"¿Quién aprueba el pase?","questionMs":61000,"channel":"system","startedAt":"2026-10-09T05:42:10Z","state":"running"}"#,
+        )
+        .expect("b2");
+        std::fs::write(
+            dir.join("a1.json"),
+            r#"{"id":"a1","auto":true,"question":"¿Dónde corre el job?","startedAt":"2026-10-09T05:41:00Z","state":"running"}"#,
+        )
+        .expect("a1");
+        std::fs::write(
+            dir.join("c3.json"),
+            r#"{"id":"c3","auto":true,"question":"¿Hay rollback?","startedAt":"2026-10-09T05:43:00Z","state":"queued"}"#,
+        )
+        .expect("c3");
+        std::fs::write(dir.join("d4.json"), r#"{"id":"d4","auto":false,"question":null,"startedAt":"2026-10-09T05:43:30Z","state":"running"}"#)
+            .expect("d4");
+        std::fs::write(dir.join("broken.json"), "{\"id\":").expect("broken");
+        std::fs::write(dir.join("notes.txt"), "x").expect("txt");
+        std::fs::write(live.join("asking.json"), r#"{"auto":false,"question":"¿legado?","startedAt":"2026-10-09T05:40:00Z"}"#).expect("legacy");
+
+        let asks = read_pending_asks(&live);
+        let ids: Vec<_> = asks.iter().map(|ask| ask.id.clone().unwrap_or_default()).collect();
+        assert_eq!(ids, vec!["a1", "b2", "c3", "d4"]);
+        assert_eq!(asks[1].question_ms, Some(61_000));
+        assert_eq!(asks[1].channel.as_deref(), Some("system"));
+        assert_eq!(asks[0].state, AskPhase::Running);
+        assert_eq!(asks[2].state, AskPhase::Queued);
+        assert!(!asks[3].auto);
+        assert_eq!(asks[3].question, None);
+        let _ = std::fs::remove_dir_all(&live);
+    }
+
+    #[test]
+    fn an_asking_file_without_id_takes_its_file_name() {
+        let live = scratch("asking-noid");
+        let dir = live.join("asking");
+        std::fs::create_dir_all(&dir).expect("dir");
+        std::fs::write(dir.join("k9.json"), r#"{"auto":true,"question":"¿Y?","startedAt":"2026-10-09T05:41:00Z"}"#).expect("k9");
+        let asks = read_asking_dir(&dir).expect("asks");
+        assert_eq!(asks[0].id.as_deref(), Some("k9"));
+        assert_eq!(asks[0].state, AskPhase::Running);
+        let _ = std::fs::remove_dir_all(&live);
+    }
+
+    #[test]
+    fn an_empty_asking_directory_means_nothing_is_being_answered() {
+        let live = scratch("asking-empty");
+        std::fs::create_dir_all(live.join("asking")).expect("dir");
+        std::fs::write(live.join("asking.json"), r#"{"auto":true,"question":"¿viejo?","startedAt":"2026-10-09T05:40:00Z"}"#).expect("legacy");
+        assert!(read_pending_asks(&live).is_empty());
+        let _ = std::fs::remove_dir_all(&live);
+    }
+
+    #[test]
+    fn without_the_asking_directory_the_legacy_file_is_the_only_pending_answer() {
+        let live = scratch("asking-legacy");
+        assert!(read_pending_asks(&live).is_empty());
+        assert!(read_asking_dir(&live.join("asking")).is_none());
+        std::fs::write(live.join("asking.json"), r#"{"auto":true,"question":"¿Dónde está el pipeline?","startedAt":"2026-10-09T05:41:38Z"}"#).expect("legacy");
+        let asks = read_pending_asks(&live);
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].id, None);
+        assert_eq!(asks[0].state, AskPhase::Running);
+        assert_eq!(asks[0].question.as_deref(), Some("¿Dónde está el pipeline?"));
+        let _ = std::fs::remove_dir_all(&live);
     }
 
     #[test]
@@ -979,6 +1139,11 @@ mod tests {
         assert_eq!(config_value("live.autoAskMinSeconds", &json!(30)).expect("int"), "30");
         assert!(config_value("live.autoAskMinSeconds", &json!(5)).is_err());
         assert!(config_value("live.autoAskMinSeconds", &json!(121)).is_err());
+        assert_eq!(config_value("live.autoAskConcurrency", &json!(1)).expect("int"), "1");
+        assert_eq!(config_value("live.autoAskConcurrency", &json!(6)).expect("int"), "6");
+        assert!(config_value("live.autoAskConcurrency", &json!(0)).is_err());
+        assert!(config_value("live.autoAskConcurrency", &json!(7)).is_err());
+        assert!(config_value("live.autoAskConcurrency", &json!("3")).is_err());
         assert!(config_value("live.other", &json!(true)).is_err());
     }
 

@@ -704,3 +704,48 @@
   border-color: var(--elev);
   color: var(--fg-mute);
 }
+
+.live-pending-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.live-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: var(--radius-card);
+  background: var(--card-quiet);
+  border: 1px dashed var(--line);
+  font-size: 12px;
+  color: var(--fg);
+}
+
+.live-pending-status {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--running);
+}
+
+.live-pending--queued .live-pending-status {
+  color: var(--fg-dim);
+}
+
+.live-pending-question {
+  flex-grow: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-pending--queued .live-pending-question {
+  color: var(--fg-dim);
+}
