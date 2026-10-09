@@ -123,6 +123,9 @@ pub fn recap_command(recap: &std::path::Path, path: &str) -> Command {
     if let Some(home) = node::home() {
         command.env("HOME", home);
     }
+    for (key, value) in node::identity() {
+        command.env(key, value);
+    }
     for key in PASSTHROUGH_ENV {
         if let Some(value) = std::env::var_os(key) {
             command.env(key, value);

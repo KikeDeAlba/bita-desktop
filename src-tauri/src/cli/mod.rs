@@ -183,6 +183,9 @@ impl Cli {
         if let Some(home) = env::var_os("HOME") {
             command.env("HOME", home);
         }
+        for (key, value) in node::identity() {
+            command.env(key, value);
+        }
 
         let output = timeout(limit, run_with_input(command, options.stdin))
             .await
