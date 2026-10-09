@@ -2,6 +2,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::AppHandle;
 
 pub const LIVE: &str = "live-assist";
+pub const LIVE_WIDE: &str = "live-wide";
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let bita = Submenu::with_items(
@@ -41,6 +42,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             &PredefinedMenuItem::close_window(app, Some("Cerrar"))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, LIVE, "Asistente de reunión", true, None::<&str>)?,
+            &MenuItem::with_id(app, LIVE_WIDE, "Ventana amplia", true, None::<&str>)?,
         ],
     )?;
 

@@ -9,6 +9,7 @@ import {
   liveState,
   notesToday,
   onDocsChanged,
+  onLiveSettings,
   onLiveState,
   onLiveTranscript,
   pendingProposals,
@@ -583,6 +584,10 @@ async function start(): Promise<void> {
   onDocsChanged(() => {
     void loadTodayNotes()
     void loadProposals()
+  })
+
+  onLiveSettings(() => {
+    showLiveSettings()
   })
 
   onLiveState(() => {

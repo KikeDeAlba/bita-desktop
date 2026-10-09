@@ -52,6 +52,12 @@ pub struct Answer {
     pub sources: Vec<AnswerSource>,
     #[serde(default)]
     pub auto: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -327,6 +333,29 @@ mod tests {
             r#"{"id":"a3","askedAt":"2026-10-09T05:42:00Z","question":"q","answer":"a","found":false,"auto":false}"#,
         );
         assert!(!explicit[0].auto);
+    }
+
+    #[test]
+    fn an_answer_knows_where_its_question_came_from_when_recap_says_so() {
+        let answers: Vec<Answer> = parse_jsonl(
+            r#"{"id":"a4","askedAt":"2026-10-09T05:41:38Z","answeredAt":"2026-10-09T05:41:47Z","questionMs":1411000,"channel":"system","question":"q","answer":"a","found":true,"auto":true}"#,
+        );
+        assert_eq!(answers[0].answered_at.as_deref(), Some("2026-10-09T05:41:47Z"));
+        assert_eq!(answers[0].question_ms, Some(1_411_000));
+        assert_eq!(answers[0].channel.as_deref(), Some("system"));
+    }
+
+    #[test]
+    fn an_older_answer_without_origin_still_reads_and_serializes_without_it() {
+        let answers: Vec<Answer> = parse_jsonl(
+            r#"{"id":"a5","askedAt":"2026-10-09T05:41:38Z","question":"q","answer":"a","found":true}"#,
+        );
+        assert_eq!(answers[0].answered_at, None);
+        assert_eq!(answers[0].question_ms, None);
+        assert_eq!(answers[0].channel, None);
+        let text = serde_json::to_string(&answers[0]).expect("serialize");
+        assert!(!text.contains("answeredAt"));
+        assert!(!text.contains("questionMs"));
     }
 
     #[test]
