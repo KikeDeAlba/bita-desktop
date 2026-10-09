@@ -32,6 +32,8 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 const SETTINGS_FILE: &str = "live.json";
 const STATE_DIR_ENV: &str = "RECAP_STATE_DIR";
 const EDITOR_OPEN: &str = "/usr/bin/open";
+const AUTO_ASK_MIN_SECONDS: i64 = 10;
+const AUTO_ASK_MAX_SECONDS: i64 = 120;
 
 type Fingerprint = Option<(SystemTime, u64)>;
 
@@ -54,6 +56,20 @@ pub struct LiveConfig {
     pub proposals: bool,
     pub assist_model: Option<String>,
     pub max_chunk_seconds: Option<i64>,
+    pub auto_ask: Option<bool>,
+    pub auto_ask_model: Option<String>,
+    pub auto_ask_min_seconds: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AskingState {
+    #[serde(default)]
+    pub auto: bool,
+    #[serde(default)]
+    pub question: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -66,6 +82,7 @@ pub struct LiveView {
     pub transcript: Vec<Segment>,
     pub answers: Vec<Answer>,
     pub asking: bool,
+    pub pending_ask: Option<AskingState>,
     pub shortcut: String,
     pub visible: bool,
 }
@@ -92,8 +109,10 @@ struct SessionInner {
     project: Option<String>,
     transcript: Vec<Segment>,
     answers: Vec<Answer>,
+    pending_ask: Option<AskingState>,
     transcript_mark: Fingerprint,
     answers_mark: Fingerprint,
+    asking_mark: Fingerprint,
 }
 
 #[derive(Default)]
@@ -133,6 +152,19 @@ pub fn parse_active(text: &str) -> Option<ActiveMeeting> {
     Some(active)
 }
 
+pub fn parse_asking(text: &str) -> Option<AskingState> {
+    let mut state: AskingState = serde_json::from_str(text.trim()).ok()?;
+    state.question = state
+        .question
+        .map(|question| question.trim().to_string())
+        .filter(|question| !question.is_empty());
+    Some(state)
+}
+
+pub fn read_asking(path: &Path) -> Option<AskingState> {
+    parse_asking(&fs::read_to_string(path).ok()?)
+}
+
 pub fn parse_config(data: &Value) -> Option<LiveConfig> {
     let settings = data.get("settings")?.as_object()?;
     let flag = |key: &str, fallback: bool| settings.get(key).and_then(Value::as_bool).unwrap_or(fallback);
@@ -145,6 +177,12 @@ pub fn parse_config(data: &Value) -> Option<LiveConfig> {
             .and_then(Value::as_str)
             .map(str::to_string),
         max_chunk_seconds: settings.get("live.maxChunkSeconds").and_then(Value::as_i64),
+        auto_ask: settings.get("live.autoAsk").and_then(Value::as_bool),
+        auto_ask_model: settings
+            .get("live.autoAskModel")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        auto_ask_min_seconds: settings.get("live.autoAskMinSeconds").and_then(Value::as_i64),
     })
 }
 
@@ -418,7 +456,7 @@ fn ended(app: &AppHandle) {
 
 fn refresh_files(app: &AppHandle) {
     let session = app.state::<LiveSession>();
-    let (dir, meeting_id, transcript_mark, answers_mark) = {
+    let (dir, meeting_id, transcript_mark, answers_mark, asking_mark) = {
         let inner = session.lock();
         let Some(active) = inner.active.as_ref() else {
             return;
@@ -428,6 +466,7 @@ fn refresh_files(app: &AppHandle) {
             active.meeting_id.clone(),
             inner.transcript_mark,
             inner.answers_mark,
+            inner.asking_mark,
         )
     };
 
@@ -464,6 +503,22 @@ fn refresh_files(app: &AppHandle) {
             inner.answers = answers;
         }
         let _ = app.emit(STATE_EVENT, ());
+    }
+
+    let asking_path = dir.join("asking.json");
+    let current = fingerprint(&asking_path);
+    if current != asking_mark {
+        let pending = read_asking(&asking_path);
+        let changed = {
+            let mut inner = session.lock();
+            inner.asking_mark = current;
+            let changed = inner.pending_ask != pending;
+            inner.pending_ask = pending;
+            changed
+        };
+        if changed {
+            let _ = app.emit(STATE_EVENT, ());
+        }
     }
 }
 
@@ -510,6 +565,7 @@ fn view(app: &AppHandle) -> LiveView {
         transcript: inner.transcript.clone(),
         answers: inner.answers.clone(),
         asking: ask::is_asking(),
+        pending_ask: inner.pending_ask.clone(),
         shortcut,
         visible: is_visible(app),
     }
@@ -568,7 +624,7 @@ pub async fn recap_config() -> Result<Option<LiveConfig>, Problem> {
 }
 
 pub fn config_value(key: &str, value: &Value) -> Result<String, Problem> {
-    const BOOLEAN: [&str; 3] = ["live.enabled", "live.openWindow", "live.proposals"];
+    const BOOLEAN: [&str; 4] = ["live.enabled", "live.openWindow", "live.proposals", "live.autoAsk"];
     if BOOLEAN.contains(&key) {
         return value
             .as_bool()
@@ -580,11 +636,21 @@ pub fn config_value(key: &str, value: &Value) -> Result<String, Problem> {
             .as_i64()
             .map(|seconds| seconds.to_string())
             .ok_or_else(|| Problem::new(ProblemKind::CliFailed, "live.maxChunkSeconds es un número de segundos.")),
-        "live.assistModel" => Ok(match value {
+        "live.autoAskMinSeconds" => value
+            .as_i64()
+            .filter(|seconds| (AUTO_ASK_MIN_SECONDS..=AUTO_ASK_MAX_SECONDS).contains(seconds))
+            .map(|seconds| seconds.to_string())
+            .ok_or_else(|| {
+                Problem::new(
+                    ProblemKind::CliFailed,
+                    format!("live.autoAskMinSeconds va de {AUTO_ASK_MIN_SECONDS} a {AUTO_ASK_MAX_SECONDS} segundos."),
+                )
+            }),
+        "live.assistModel" | "live.autoAskModel" => Ok(match value {
             Value::Null => "null".into(),
             Value::String(text) if text.trim().is_empty() => "null".into(),
             Value::String(text) => text.trim().to_string(),
-            _ => return Err(Problem::new(ProblemKind::CliFailed, "live.assistModel es un nombre de modelo.")),
+            _ => return Err(Problem::new(ProblemKind::CliFailed, format!("{key} es un nombre de modelo."))),
         }),
         other => Err(Problem::new(ProblemKind::CliFailed, format!("No conozco el ajuste «{other}»."))),
     }
@@ -656,7 +722,7 @@ pub async fn open_source_file(path: String) -> Result<(), Problem> {
 
 #[cfg(test)]
 mod tests {
-    use super::{config_value, openable_file, parse_active, parse_config, state_dir_from, tail};
+    use super::{config_value, openable_file, parse_active, parse_asking, parse_config, read_asking, state_dir_from, tail};
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -713,7 +779,59 @@ mod tests {
         assert!(config.proposals);
         assert_eq!(config.assist_model, None);
         assert_eq!(config.max_chunk_seconds, Some(20));
+        assert_eq!(config.auto_ask, None);
+        assert_eq!(config.auto_ask_model, None);
+        assert_eq!(config.auto_ask_min_seconds, None);
         assert!(parse_config(&json!({"meetings": []})).is_none());
+    }
+
+    #[test]
+    fn the_automatic_answer_settings_are_read_when_recap_has_them() {
+        let data = json!({
+            "settings": {
+                "live.enabled": true,
+                "live.openWindow": true,
+                "live.proposals": true,
+                "live.assistModel": null,
+                "live.maxChunkSeconds": 20,
+                "live.autoAsk": false,
+                "live.autoAskModel": "haiku",
+                "live.autoAskMinSeconds": 30
+            }
+        });
+        let config = parse_config(&data).expect("config");
+        assert_eq!(config.auto_ask, Some(false));
+        assert_eq!(config.auto_ask_model.as_deref(), Some("haiku"));
+        assert_eq!(config.auto_ask_min_seconds, Some(30));
+    }
+
+    #[test]
+    fn the_asking_file_describes_the_running_answer() {
+        let detected = parse_asking(r#"{"auto":true,"question":"¿Cómo se despliega bita-desktop?","startedAt":"2026-10-09T05:41:38Z"}"#)
+            .expect("detected");
+        assert!(detected.auto);
+        assert_eq!(detected.question.as_deref(), Some("¿Cómo se despliega bita-desktop?"));
+        assert_eq!(detected.started_at.as_deref(), Some("2026-10-09T05:41:38Z"));
+
+        let manual = parse_asking(r#"{"auto":false,"question":null,"startedAt":"2026-10-09T05:42:00Z"}"#).expect("manual");
+        assert!(!manual.auto);
+        assert_eq!(manual.question, None);
+
+        let blank = parse_asking(r#"{"auto":false,"question":"  ","startedAt":"2026-10-09T05:42:00Z"}"#).expect("blank");
+        assert_eq!(blank.question, None);
+
+        assert!(parse_asking("").is_none());
+        assert!(parse_asking("{").is_none());
+    }
+
+    #[test]
+    fn a_missing_asking_file_means_nothing_is_being_answered() {
+        let path = std::env::temp_dir().join(format!("bita-asking-{}.json", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert!(read_asking(&path).is_none());
+        std::fs::write(&path, r#"{"auto":true,"question":"¿Dónde está el pipeline?","startedAt":"2026-10-09T05:41:38Z"}"#).expect("write");
+        assert!(read_asking(&path).is_some_and(|state| state.auto));
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -723,6 +841,13 @@ mod tests {
         assert_eq!(config_value("live.maxChunkSeconds", &json!(15)).expect("int"), "15");
         assert_eq!(config_value("live.assistModel", &json!("")).expect("null"), "null");
         assert_eq!(config_value("live.assistModel", &json!(" sonnet ")).expect("model"), "sonnet");
+        assert_eq!(config_value("live.autoAsk", &json!(false)).expect("bool"), "false");
+        assert!(config_value("live.autoAsk", &json!("no")).is_err());
+        assert_eq!(config_value("live.autoAskModel", &json!("haiku")).expect("model"), "haiku");
+        assert_eq!(config_value("live.autoAskModel", &json!(null)).expect("reset"), "null");
+        assert_eq!(config_value("live.autoAskMinSeconds", &json!(30)).expect("int"), "30");
+        assert!(config_value("live.autoAskMinSeconds", &json!(5)).is_err());
+        assert!(config_value("live.autoAskMinSeconds", &json!(121)).is_err());
         assert!(config_value("live.other", &json!(true)).is_err());
     }
 

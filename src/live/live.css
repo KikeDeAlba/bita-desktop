@@ -291,6 +291,30 @@
   user-select: text;
 }
 
+.live-question-text {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.live-auto {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 1px solid var(--aqua);
+  border-radius: var(--radius-control);
+  color: var(--aqua);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.live-question .live-auto {
+  margin-top: 1px;
+}
+
 .live-question-mark {
   flex-shrink: 0;
   margin-top: 2px;
