@@ -1464,6 +1464,37 @@ input {
   font-size: 12px;
 }
 
+.live-stepper {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--elev-strong);
+  background: var(--inset);
+}
+
+.live-stepper-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 100%;
+  color: var(--fg);
+}
+
+.live-stepper-button:disabled {
+  opacity: 0.35;
+}
+
+.live-stepper-value {
+  min-width: 18px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg-bright);
+}
+
 .live-shortcut-button--capturing {
   border-color: var(--estimate);
   color: var(--estimate);

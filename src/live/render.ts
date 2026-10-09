@@ -1,5 +1,6 @@
 import {
   describeProblem,
+  type AskPhase,
   openExternal,
   openNotes,
   openSourceFile,
@@ -92,6 +93,17 @@ export function manualBadge(): HTMLElement {
   const badge = element('span', 'live-auto live-auto--manual', 'Manual')
   badge.title = 'La pediste con el atajo o escribiéndola'
   return badge
+}
+
+export function pendingLabel(state: AskPhase): string {
+  return state === 'queued' ? 'En cola' : 'Buscando…'
+}
+
+export function pendingMark(state: AskPhase, size: number): SVGSVGElement {
+  if (state === 'queued') return icon('clock', size)
+  const spin = icon('spinner', size)
+  spin.classList.add('live-spin')
+  return spin
 }
 
 export function channelLabel(channel: string): string {

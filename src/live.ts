@@ -1,4 +1,4 @@
-import { liveHide, liveModeSet, liveSources, type AnswerSource, type LiveAnswer } from './bita.ts'
+import { liveHide, liveModeSet, liveSources, type AnswerSource, type LiveAnswer, type PendingAsk } from './bita.ts'
 import { element, icon, must } from './dom.ts'
 import {
   askedClock,
@@ -6,7 +6,10 @@ import {
   backlogButton,
   delayLabel,
   elapsedLabel,
+  manualBadge,
   markdown,
+  pendingLabel,
+  pendingMark,
   sourceChip,
   transcriptLine,
   type SourceActions,
@@ -27,6 +30,7 @@ let noticeTimer = 0
 const session = new Session({
   paint,
   flash,
+  followLanded: true,
   reloaded: () => {
     void loadSources()
   },
@@ -208,6 +212,25 @@ function collapsed(answer: LiveAnswer): HTMLElement {
   return button
 }
 
+function pendingRow(pending: PendingAsk): HTMLElement {
+  const row = element('div', pending.state === 'queued' ? 'live-pending live-pending--queued' : 'live-pending')
+  const status = element('span', 'live-pending-status')
+  status.append(pendingMark(pending.state, 11), element('span', '', pendingLabel(pending.state)))
+  const question = pending.question ?? 'Buscando la última pregunta…'
+  const text = element('span', 'live-pending-question', question)
+  text.title = question
+  row.append(status, text, pending.auto ? autoBadge() : manualBadge())
+  return row
+}
+
+function pendingStack(pending: PendingAsk[]): HTMLElement {
+  const stack = element('section', 'live-pending-stack')
+  stack.setAttribute('aria-label', 'Preguntas en curso')
+  stack.setAttribute('aria-live', 'polite')
+  for (const ask of [...pending].reverse()) stack.append(pendingRow(ask))
+  return stack
+}
+
 function hintCard(): HTMLElement {
   const view = session.view
   const box = element('div', 'live-hint')
@@ -238,11 +261,10 @@ function answersPanel(): HTMLElement {
   const current = session.current
   const list = element('main', 'live-answers')
   const doneId = current?.done?.id ?? null
-  const detected = current === null ? session.detectedPending() : null
-  const shownId = detected !== null ? null : current === null ? (session.focus ?? view.answers.at(-1)?.id ?? null) : doneId
-  if (detected !== null) {
-    list.append(card(detected.question ?? '', { progress: null, text: '', sources: [], answer: null, error: null, auto: true }))
-  } else if (current !== null) {
+  const shownId = current === null ? (session.focus ?? view.answers.at(-1)?.id ?? null) : doneId
+  const pending = session.pendingAsks()
+  if (pending.length > 0) list.append(pendingStack(pending))
+  if (current !== null) {
     list.append(
       card(current.question, {
         progress: current.progress,
@@ -312,7 +334,7 @@ function askBox(): HTMLElement {
 
 function paint(): void {
   const answers = element('div', 'live-body')
-  const idle = session.current === null && session.view.answers.length === 0 && session.detectedPending() === null
+  const idle = session.current === null && session.view.answers.length === 0 && session.pendingAsks().length === 0
   if (idle) {
     answers.append(transcriptPanel(true), hintCard())
   } else {

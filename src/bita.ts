@@ -410,6 +410,7 @@ export interface LiveAnswer {
   answeredAt?: string
   questionMs?: number
   channel?: 'mic' | 'system' | string
+  askId?: string
 }
 
 export type StreamEvent =
@@ -432,7 +433,11 @@ export interface ActiveMeeting {
   startedAt: string | null
 }
 
-export interface AskingState {
+export type AskPhase = 'queued' | 'running'
+
+export interface PendingAsk {
+  id: string | null
+  state: AskPhase
   auto: boolean
   question: string | null
   startedAt: string | null
@@ -451,7 +456,7 @@ export interface LiveView {
   transcript: MeetingSegment[]
   answers: LiveAnswer[]
   asking: boolean
-  pendingAsk: AskingState | null
+  pendingAsks: PendingAsk[]
   shortcut: string
   visible: boolean
   mode: LiveMode
@@ -479,6 +484,7 @@ export interface LiveConfig {
   autoAsk: boolean | null
   autoAskModel: string | null
   autoAskMinSeconds: number | null
+  autoAskConcurrency: number | null
 }
 
 export interface LiveSources {

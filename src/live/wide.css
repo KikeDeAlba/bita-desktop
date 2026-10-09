@@ -684,3 +684,11 @@ body.resizing * {
     padding: 18px 16px;
   }
 }
+
+.wide-status--queued {
+  color: var(--fg-dim);
+}
+
+.wide-queued {
+  color: var(--fg-dim);
+}
