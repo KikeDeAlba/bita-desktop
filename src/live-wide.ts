@@ -21,6 +21,8 @@ import {
   manualBadge,
   markdown,
   offsetOf,
+  pendingLabel,
+  pendingMark,
   questionKey,
   responseTime,
   sourceAction,
@@ -42,13 +44,21 @@ interface Item {
   versions: LiveAnswer[]
   auto: boolean
   state: ItemState
-  streaming: 'manual' | 'detected' | null
+  queued: boolean
+  streaming: 'manual' | 'pending' | null
   origin: Origin
   sortMs: number
+  tieMs: number
+}
+
+interface PendingTarget {
+  id: string | null
+  question: string
 }
 
 const STACKED_QUERY = '(max-width: 1100px)'
 const PENDING_KEY = '\u0000pending'
+const ASK_PREFIX = '\u0000ask:'
 const PICK_HOLD_MS = 30_000
 const COPIED_MS = 1400
 const FOLLOW_SLACK_PX = 32
@@ -75,6 +85,7 @@ let pickedAt = 0
 let known = new Set<string>()
 let versionCounts = new Map<string, number>()
 let chosenVersion = new Map<string, string>()
+let pendingTargets = new Map<string, PendingTarget>()
 let following = true
 let scrolling = false
 let draft = ''
@@ -90,6 +101,7 @@ const session = new Session({
     known = new Set()
     versionCounts = new Map()
     chosenVersion = new Map()
+    pendingTargets = new Map()
     selected = null
     following = true
     resetTranscript()
@@ -131,9 +143,11 @@ function buildItems(): Item[] {
         versions: [],
         auto: answer.auto === true,
         state: 'answered',
+        queued: false,
         streaming: null,
         origin,
         sortMs: origin.ms ?? offsetOf(answer.askedAt, startedAt()) ?? 0,
+        tieMs: timeOf(answer.askedAt),
       }
       groups.set(key, item)
     }
@@ -150,23 +164,28 @@ function buildItems(): Item[] {
       versions: [],
       auto,
       state: 'searching',
+      queued: false,
       streaming: null,
       origin,
       sortMs: origin.ms ?? Number.MAX_SAFE_INTEGER,
+      tieMs: Number.MAX_SAFE_INTEGER,
     }
     groups.set(key, item)
     return item
   }
 
-  const detected = session.detectedPending()
-  if (detected !== null && detected.question !== null) {
+  for (const pending of session.pendingAsks()) {
+    const question = pending.question ?? ''
+    const key = `${ASK_PREFIX}${pending.id ?? `${pending.auto ? 'auto' : 'manual'}:${pending.startedAt ?? ''}`}`
     const origin = originOf(
-      { question: detected.question, questionMs: detected.questionMs, channel: detected.channel, askedAt: detected.startedAt, startedAt: startedAt() },
+      { question, questionMs: pending.questionMs, channel: pending.channel, askedAt: pending.startedAt, startedAt: startedAt() },
       lines,
     )
-    const item = live(questionKey(detected.question), detected.question, true, origin)
-    item.state = 'searching'
-    item.streaming = 'detected'
+    pendingTargets.set(key, { id: pending.id, question })
+    const item = live(key, question, pending.auto, origin)
+    item.queued = pending.state === 'queued'
+    item.streaming = 'pending'
+    item.tieMs = timeOf(pending.startedAt)
   }
 
   const current = session.current
@@ -178,7 +197,19 @@ function buildItems(): Item[] {
     item.streaming = current.error === null ? 'manual' : null
   }
 
-  return [...groups.values()].sort((left, right) => right.sortMs - left.sortMs)
+  return [...groups.values()].sort((left, right) => right.sortMs - left.sortMs || right.tieMs - left.tieMs)
+}
+
+function timeOf(iso: string | null | undefined): number {
+  const ms = iso === null || iso === undefined ? Number.NaN : new Date(iso).getTime()
+  return Number.isFinite(ms) ? ms : 0
+}
+
+function landedKey(target: PendingTarget): string | null {
+  const id = target.id
+  const answer = id === null ? undefined : session.view.answers.find((candidate) => candidate.askId === id)
+  if (answer !== undefined) return questionKey(answer.question)
+  return target.question.trim().length > 0 ? questionKey(target.question) : null
 }
 
 function choose(next: Item[]): void {
@@ -192,6 +223,15 @@ function choose(next: Item[]): void {
   const current = session.current
   if (selected === PENDING_KEY && !next.some((item) => item.key === PENDING_KEY) && current !== null && current.question.trim().length > 0) {
     selected = questionKey(current.question)
+  }
+  const target = selected === null ? undefined : pendingTargets.get(selected)
+  if (selected !== null && target !== undefined && !next.some((item) => item.key === selected)) {
+    const landed = landedKey(target)
+    pendingTargets.delete(selected)
+    if (landed !== null && next.some((item) => item.key === landed)) selected = landed
+  }
+  for (const key of pendingTargets.keys()) {
+    if (key !== selected && !next.some((item) => item.key === key)) pendingTargets.delete(key)
   }
   const first = fresh[0]
   if (first !== undefined && (selected === null || Date.now() - pickedAt > PICK_HOLD_MS)) selected = first.key
@@ -264,10 +304,9 @@ function paintBar(): void {
 
 function statusOf(item: Item): HTMLElement {
   if (item.state === 'searching') {
-    const status = element('span', 'wide-status wide-status--searching')
-    const spin = icon('spinner', 11)
-    spin.classList.add('live-spin')
-    status.append(spin, element('span', '', 'Buscando…'))
+    const phase = item.queued ? 'queued' : 'running'
+    const status = element('span', item.queued ? 'wide-status wide-status--queued' : 'wide-status wide-status--searching')
+    status.append(pendingMark(phase, 11), element('span', '', pendingLabel(phase)))
     return status
   }
   if (item.state === 'answered') return element('span', 'wide-status wide-status--answered', 'Respondida')
@@ -303,7 +342,7 @@ function paintList(): void {
     filter,
     selected,
     items.length,
-    visible.map((item) => [item.key, item.question, item.state, item.auto, item.versions.length, item.origin.ms]),
+    visible.map((item) => [item.key, item.question, item.state, item.queued, item.auto, item.versions.length, item.origin.ms]),
   ])
   if (signature === painted.list) return
   painted.list = signature
@@ -470,6 +509,7 @@ function answerSignature(item: Item | undefined): string {
   return JSON.stringify([
     item.key,
     item.state,
+    item.queued,
     item.streaming,
     item.question,
     item.origin,
@@ -478,7 +518,7 @@ function answerSignature(item: Item | undefined): string {
     version?.id ?? null,
     version === undefined ? null : session.backlogState(version),
     current === null ? null : [current.askId, current.progress, current.text.length, current.sources.length, current.error],
-    session.manualStreaming() || session.detectedPending() !== null,
+    session.manualStreaming(),
     session.view.active?.mode ?? null,
   ])
 }
@@ -529,7 +569,11 @@ function paintAnswer(): void {
     if (current.progress !== null) content.append(progressLine(current.progress, true))
     else if (current.text.length === 0) content.append(progressLine('Pensando', false))
     if (current.text.length > 0) content.append(markdown(current.text, true, copy))
-  } else if (item.streaming === 'detected') {
+  } else if (item.streaming === 'pending' && item.queued) {
+    const line = element('div', 'live-progress wide-queued')
+    line.append(pendingMark('queued', 12), element('span', '', 'En cola: empieza en cuanto termine otra respuesta'))
+    content.append(line)
+  } else if (item.streaming === 'pending') {
     content.append(progressLine('Buscando…', false))
   } else {
     if (item.state === 'failed' && current !== null && current.error !== null) {
@@ -575,7 +619,7 @@ function paintAnswer(): void {
   }
 
   if (version !== undefined && !streaming) {
-    const busy = session.manualStreaming() || session.detectedPending() !== null
+    const busy = session.manualStreaming()
     const row = element('div', 'wide-actions')
     row.append(
       actionButton('copy', 'Copiar respuesta', () => copy(version.answer)),

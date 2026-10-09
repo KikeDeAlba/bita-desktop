@@ -124,6 +124,29 @@ function toggle(label: string, on: boolean, disabled: boolean, onChange: (next: 
   return button
 }
 
+const CONCURRENCY_MIN = 1
+const CONCURRENCY_MAX = 6
+
+function stepper(label: string, value: number, disabled: boolean, onChange: (next: number) => void): HTMLElement {
+  const group = element('div', 'live-stepper')
+  group.setAttribute('role', 'group')
+  group.setAttribute('aria-label', label)
+  const step = (name: 'minus' | 'plus', text: string, next: number): HTMLButtonElement => {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'live-stepper-button'
+    button.setAttribute('aria-label', text)
+    button.disabled = disabled || next < CONCURRENCY_MIN || next > CONCURRENCY_MAX
+    button.append(icon(name, 12))
+    button.addEventListener('click', () => onChange(next))
+    return button
+  }
+  const shown = element('output', 'live-stepper-value', String(value))
+  shown.setAttribute('aria-live', 'polite')
+  group.append(step('minus', 'Una menos', value - 1), shown, step('plus', 'Una más', value + 1))
+  return group
+}
+
 function settingRow(title: string, note: string, control: HTMLElement, last = false): HTMLElement {
   const row = element('div', last ? 'live-setting live-setting--last' : 'live-setting')
   const words = element('div', 'live-setting-words')
@@ -200,8 +223,19 @@ export function renderLiveSettings(
           (next) => change('live.autoAsk', next),
         ),
       ),
-      settingRow('Atajo para responder', 'funciona aunque bita no tenga el foco', shortcutButton(), true),
     )
+    const concurrency = config?.autoAskConcurrency ?? null
+    if (config !== null && concurrency !== null) {
+      const value = Math.min(CONCURRENCY_MAX, Math.max(CONCURRENCY_MIN, concurrency))
+      group.append(
+        settingRow(
+          'Respuestas en paralelo',
+          'cuántas preguntas detectadas se responden a la vez; las demás esperan en cola',
+          stepper('Respuestas en paralelo', value, config.autoAsk !== true, (next) => change('live.autoAskConcurrency', next)),
+        ),
+      )
+    }
+    group.append(settingRow('Atajo para responder', 'funciona aunque bita no tenga el foco', shortcutButton(), true))
     host.append(group)
 
     const sources = element('div', 'live-settings-section')
@@ -279,7 +313,7 @@ export function renderLiveSettings(
     return button
   }
 
-  const change = (key: string, value: boolean): void => {
+  const change = (key: string, value: boolean | number): void => {
     void recapConfigSet(key, value)
       .then((next) => {
         if (next !== null) state.config = next

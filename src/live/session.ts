@@ -8,10 +8,10 @@ import {
   onLiveState,
   onLiveTranscript,
   type AnswerSource,
-  type AskingState,
   type LiveAnswer,
   type LiveTranscriptUpdate,
   type LiveView,
+  type PendingAsk,
   type StreamEvent,
 } from '../bita.ts'
 import { ERROR_TEXT, sameQuestion } from './render.ts'
@@ -33,9 +33,15 @@ export interface SessionHooks {
   meetingChanged?: () => void
   reloaded?: () => void
   transcript?: (update: LiveTranscriptUpdate) => void
+  followLanded?: boolean
 }
 
 const LANDED_SLACK_MS = 5000
+const OWN_SLACK_MS = 5000
+
+function timeOf(iso: string | null | undefined): number {
+  return iso === null || iso === undefined ? Number.NaN : new Date(iso).getTime()
+}
 
 export const EMPTY_VIEW: LiveView = {
   active: null,
@@ -45,7 +51,7 @@ export const EMPTY_VIEW: LiveView = {
   transcript: [],
   answers: [],
   asking: false,
-  pendingAsk: null,
+  pendingAsks: [],
   shortcut: 'Ctrl+Alt+Space',
   visible: true,
   mode: 'compact',
@@ -54,10 +60,10 @@ export const EMPTY_VIEW: LiveView = {
 export class Session {
   view: LiveView = { ...EMPTY_VIEW }
   current: Current | null = null
-  watched: AskingState | null = null
   focus: string | null = null
   backlogged = new Set<string>()
   backlogBusy = new Set<string>()
+  private seen = new Set<string>()
 
   private readonly hooks: SessionHooks
 
@@ -69,43 +75,57 @@ export class Session {
     return this.current !== null && this.current.done === null && this.current.error === null
   }
 
-  landed(pending: AskingState): LiveAnswer | undefined {
+  resolvedBy(pending: PendingAsk): LiveAnswer | undefined {
+    const id = pending.id
+    if (id !== null) {
+      const byId = this.view.answers.find((answer) => answer.askId === id)
+      if (byId !== undefined) return byId
+    }
     const question = pending.question
     if (question === null) return undefined
-    const started = pending.startedAt === null ? Number.NaN : new Date(pending.startedAt).getTime()
+    const started = timeOf(pending.startedAt)
     return this.view.answers.findLast((answer) => {
-      if (answer.auto !== true || !sameQuestion(answer.question, question)) return false
+      if (id !== null && answer.askId !== undefined) return false
+      if ((answer.auto === true) !== pending.auto || !sameQuestion(answer.question, question)) return false
       if (!Number.isFinite(started)) return true
-      const asked = new Date(answer.askedAt).getTime()
+      const asked = timeOf(answer.askedAt)
       return !Number.isFinite(asked) || asked >= started - LANDED_SLACK_MS
     })
   }
 
-  detectedPending(): AskingState | null {
-    const pending = this.view.pendingAsk
-    if (pending === null || !pending.auto || pending.question === null) return null
-    if (this.manualStreaming() || this.landed(pending) !== undefined) return null
-    return pending
+  ownPending(): PendingAsk | null {
+    const current = this.current
+    if (current === null || !this.manualStreaming()) return null
+    const started = timeOf(current.startedAt)
+    const asked = current.question.trim()
+    let best: PendingAsk | null = null
+    let bestGap = Number.POSITIVE_INFINITY
+    for (const pending of this.view.pendingAsks) {
+      if (pending.auto) continue
+      if (pending.question !== null && asked.length > 0 && !sameQuestion(pending.question, asked)) continue
+      const gap = Math.abs(timeOf(pending.startedAt) - started)
+      if (!Number.isFinite(gap) || gap > OWN_SLACK_MS || gap >= bestGap) continue
+      best = pending
+      bestGap = gap
+    }
+    return best
   }
 
-  followDetected(): void {
-    const pending = this.detectedPending()
-    if (pending !== null) {
-      const watched = this.watched
-      if (watched === null || watched.startedAt !== pending.startedAt || watched.question !== pending.question) {
-        this.watched = pending
-        this.current = null
-        this.focus = null
-      }
-      return
-    }
-    if (this.watched === null) return
-    const answer = this.landed(this.watched)
-    this.watched = null
-    if (answer !== undefined && !this.manualStreaming()) {
-      this.current = null
-      this.focus = answer.id
-    }
+  pendingAsks(): PendingAsk[] {
+    const own = this.ownPending()
+    return this.view.pendingAsks.filter(
+      (pending) => pending !== own && !(pending.auto && pending.question === null) && this.resolvedBy(pending) === undefined,
+    )
+  }
+
+  private followLanded(): void {
+    const fresh = this.view.answers.filter((answer) => !this.seen.has(answer.id))
+    for (const answer of this.view.answers) this.seen.add(answer.id)
+    if (this.hooks.followLanded !== true || fresh.length === 0 || this.manualStreaming()) return
+    const own = this.current?.done?.id ?? null
+    if (fresh.every((answer) => answer.id === own)) return
+    this.current = null
+    this.focus = null
   }
 
   copy(text: string): void {
@@ -117,7 +137,6 @@ export class Session {
   start(askId: number, question: string): void {
     this.current = { askId, startedAt: new Date().toISOString(), question, progress: null, text: '', sources: [], done: null, error: null }
     this.focus = null
-    this.watched = null
     this.hooks.paint()
   }
 
@@ -212,11 +231,11 @@ export class Session {
     if (changed) {
       this.current = null
       this.focus = null
-      this.watched = null
       this.backlogged = new Set()
+      this.seen = new Set()
       this.hooks.meetingChanged?.()
     }
-    this.followDetected()
+    this.followLanded()
     this.hooks.paint()
     this.hooks.reloaded?.()
     return changed
