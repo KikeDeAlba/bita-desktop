@@ -405,6 +405,7 @@ export interface LiveAnswer {
   answer: string
   found: boolean
   sources: AnswerSource[]
+  auto?: boolean
 }
 
 export type StreamEvent =
@@ -427,6 +428,12 @@ export interface ActiveMeeting {
   startedAt: string | null
 }
 
+export interface AskingState {
+  auto: boolean
+  question: string | null
+  startedAt: string | null
+}
+
 export interface LiveView {
   active: ActiveMeeting | null
   title: string | null
@@ -435,6 +442,7 @@ export interface LiveView {
   transcript: MeetingSegment[]
   answers: LiveAnswer[]
   asking: boolean
+  pendingAsk: AskingState | null
   shortcut: string
   visible: boolean
 }
@@ -450,6 +458,9 @@ export interface LiveConfig {
   proposals: boolean
   assistModel: string | null
   maxChunkSeconds: number | null
+  autoAsk: boolean | null
+  autoAskModel: string | null
+  autoAskMinSeconds: number | null
 }
 
 export interface LiveSources {

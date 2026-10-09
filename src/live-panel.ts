@@ -188,6 +188,18 @@ export function renderLiveSettings(
         'se cierra sola al parar la reunión',
         toggle('Abrir la ventana al grabar', config?.openWindow ?? false, off, (next) => change('live.openWindow', next)),
       ),
+      settingRow(
+        'Detectar preguntas automáticamente',
+        config !== null && config.autoAsk === null
+          ? 'hace falta recap 0.6 o posterior'
+          : 'responde solo, sin el atajo, lo que se pueda contestar con las páginas o el código',
+        toggle(
+          'Detectar preguntas automáticamente',
+          config?.autoAsk ?? false,
+          off || config.autoAsk === null,
+          (next) => change('live.autoAsk', next),
+        ),
+      ),
       settingRow('Atajo para responder', 'funciona aunque bita no tenga el foco', shortcutButton(), true),
     )
     host.append(group)

@@ -13,6 +13,7 @@ import {
   openNotes,
   openSourceFile,
   type AnswerSource,
+  type AskingState,
   type LiveAnswer,
   type LiveView,
   type MeetingSegment,
@@ -34,9 +35,11 @@ interface Current {
 
 const CHANNEL_LABEL: Record<string, string> = { mic: 'Sala', system: 'Remotos' }
 const COPIED_MS = 1400
+const LANDED_SLACK_MS = 5000
 const ERROR_TEXT: Record<string, string> = {
   NOT_RECORDING: 'No se está grabando ninguna reunión.',
   NO_ACTIVE: 'No se está grabando ninguna reunión.',
+  ASK_BUSY: 'Ya se está respondiendo otra pregunta. Espera a que termine e inténtalo de nuevo.',
 }
 
 const root = must<HTMLElement>('#live')
@@ -49,10 +52,12 @@ let view: LiveView = {
   transcript: [],
   answers: [],
   asking: false,
+  pendingAsk: null,
   shortcut: 'Ctrl+Alt+Space',
   visible: true,
 }
 let current: Current | null = null
+let watched: AskingState | null = null
 let expanded: string | null = null
 let repoCount: number | null = null
 let sourcesFor: string | null = null
@@ -96,6 +101,58 @@ function askedClock(answer: LiveAnswer): string {
   if (started === null || started === undefined) return answer.askedAt.slice(11, 16)
   const offset = new Date(answer.askedAt).getTime() - new Date(started).getTime()
   return Number.isFinite(offset) ? clockOf(offset) : answer.askedAt.slice(11, 16)
+}
+
+function manualStreaming(): boolean {
+  return current !== null && current.done === null && current.error === null
+}
+
+function sameQuestion(left: string, right: string): boolean {
+  return left.trim().toLocaleLowerCase('es') === right.trim().toLocaleLowerCase('es')
+}
+
+function landed(pending: AskingState): LiveAnswer | undefined {
+  const question = pending.question
+  if (question === null) return undefined
+  const started = pending.startedAt === null ? Number.NaN : new Date(pending.startedAt).getTime()
+  return view.answers.findLast((answer) => {
+    if (answer.auto !== true || !sameQuestion(answer.question, question)) return false
+    if (!Number.isFinite(started)) return true
+    const asked = new Date(answer.askedAt).getTime()
+    return !Number.isFinite(asked) || asked >= started - LANDED_SLACK_MS
+  })
+}
+
+function detectedPending(): AskingState | null {
+  const pending = view.pendingAsk
+  if (pending === null || !pending.auto || pending.question === null) return null
+  if (manualStreaming() || landed(pending) !== undefined) return null
+  return pending
+}
+
+function followDetected(): void {
+  const pending = detectedPending()
+  if (pending !== null) {
+    if (watched === null || watched.startedAt !== pending.startedAt || watched.question !== pending.question) {
+      watched = pending
+      current = null
+      expanded = null
+    }
+    return
+  }
+  if (watched === null) return
+  const answer = landed(watched)
+  watched = null
+  if (answer !== undefined && !manualStreaming()) {
+    current = null
+    expanded = answer.id
+  }
+}
+
+function autoBadge(): HTMLElement {
+  const badge = element('span', 'live-auto', 'Detectada')
+  badge.title = 'El asistente detectó la pregunta en la conversación'
+  return badge
 }
 
 function flash(message: string): void {
@@ -280,12 +337,14 @@ function card(question: string, state: {
   sources: AnswerSource[]
   answer: LiveAnswer | null
   error: { code: string; message: string } | null
+  auto: boolean
 }): HTMLElement {
   const box = element('article', 'live-card')
   const head = element('div', 'live-question')
   const mark = icon('question', 14)
   mark.classList.add('live-question-mark')
-  head.append(mark, element('span', '', question.length > 0 ? question : 'Buscando la última pregunta…'))
+  head.append(mark, element('span', 'live-question-text', question.length > 0 ? question : 'Buscando la última pregunta…'))
+  if (state.auto) head.append(autoBadge())
   box.append(head)
 
   const streaming = state.answer === null && state.error === null
@@ -299,7 +358,7 @@ function card(question: string, state: {
     const line = element('div', 'live-progress')
     const spin = icon('spinner', 12)
     spin.classList.add('live-spin')
-    line.append(spin, element('span', '', 'Pensando'))
+    line.append(spin, element('span', '', state.auto ? 'Buscando…' : 'Pensando'))
     box.append(line)
   }
 
@@ -344,6 +403,7 @@ function collapsed(answer: LiveAnswer): HTMLElement {
   button.append(
     element('span', 'live-stamp', askedClock(answer)),
     element('span', 'live-earlier-question', answer.question),
+    ...(answer.auto === true ? [autoBadge()] : []),
     element(
       'span',
       answer.found ? 'live-earlier-count' : 'live-earlier-count live-earlier-count--missing',
@@ -385,8 +445,11 @@ function hintCard(): HTMLElement {
 function answersPanel(): HTMLElement {
   const list = element('main', 'live-answers')
   const doneId = current?.done?.id ?? null
-  const shownId = current === null ? (expanded ?? view.answers.at(-1)?.id ?? null) : doneId
-  if (current !== null) {
+  const detected = current === null ? detectedPending() : null
+  const shownId = detected !== null ? null : current === null ? (expanded ?? view.answers.at(-1)?.id ?? null) : doneId
+  if (detected !== null) {
+    list.append(card(detected.question ?? '', { progress: null, text: '', sources: [], answer: null, error: null, auto: true }))
+  } else if (current !== null) {
     list.append(
       card(current.question, {
         progress: current.progress,
@@ -394,12 +457,15 @@ function answersPanel(): HTMLElement {
         sources: current.sources,
         answer: current.done,
         error: current.error,
+        auto: false,
       }),
     )
   } else {
     const shown = view.answers.find((answer) => answer.id === shownId)
     if (shown !== undefined) {
-      list.append(card(shown.question, { progress: null, text: shown.answer, sources: shown.sources, answer: shown, error: null }))
+      list.append(
+        card(shown.question, { progress: null, text: shown.answer, sources: shown.sources, answer: shown, error: null, auto: shown.auto === true }),
+      )
     }
   }
   const earlier = view.answers.filter((answer) => answer.id !== shownId).reverse()
@@ -465,6 +531,7 @@ function ask(question: string | null): void {
 function start(askId: number, question: string): void {
   current = { askId, question, progress: null, text: '', sources: [], done: null, error: null }
   expanded = null
+  watched = null
   paint()
 }
 
@@ -499,7 +566,7 @@ function apply(askId: number, event: StreamEvent): void {
 
 function paint(): void {
   const answers = element('div', 'live-body')
-  const idle = current === null && view.answers.length === 0
+  const idle = current === null && view.answers.length === 0 && detectedPending() === null
   if (idle) {
     answers.append(transcriptPanel(true), hintCard())
   } else {
@@ -542,8 +609,10 @@ async function reload(): Promise<void> {
   if ((view.active?.meetingId ?? null) !== previous) {
     current = null
     expanded = null
+    watched = null
     backlogged = new Set()
   }
+  followDetected()
   paint()
   void loadSources()
 }
