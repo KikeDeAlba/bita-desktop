@@ -143,6 +143,11 @@ fn unsupported() -> StreamEvent {
     }
 }
 
+fn spawn_in_runtime(command: &mut tokio::process::Command) -> std::io::Result<tokio::process::Child> {
+    let _runtime = tauri::async_runtime::handle().inner().enter();
+    command.spawn()
+}
+
 pub fn start(app: &AppHandle, question: Option<String>) -> Result<u64, Problem> {
     let recap = recap_binary().ok_or_else(crate::recap::missing)?;
     cancel();
@@ -157,7 +162,7 @@ pub fn start(app: &AppHandle, question: Option<String>) -> Result<u64, Problem> 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child = match command.spawn() {
+    let mut child = match spawn_in_runtime(&mut command) {
         Ok(child) => child,
         Err(error) => {
             finish(id);
@@ -230,9 +235,20 @@ pub fn start(app: &AppHandle, question: Option<String>) -> Result<u64, Problem> 
 
 #[cfg(test)]
 mod tests {
-    use super::{ask_args, parse_jsonl, parse_stream_line, Answer, StreamEvent};
+    use super::{ask_args, parse_jsonl, parse_stream_line, spawn_in_runtime, Answer, StreamEvent};
 
     const DONE: &str = r#"{"type":"done","answer":{"id":"a1","askedAt":"2026-10-08T10:23:31Z","question":"¿Cómo se corre el simulador?","answer":"Con `pnpm sim:webhook`.","found":true,"sources":[{"kind":"page","label":"CoDi › Ambientes bajos","pageId":42},{"kind":"file","label":"sim/webhook.ts:18","path":"/Users/x/dev/codi/sim/webhook.ts","line":18,"repo":"codi-core"},{"kind":"commit","label":"a1c9e04","repo":"codi-core","sha":"a1c9e04"}]}}"#;
+
+    #[test]
+    fn a_child_spawns_from_a_thread_outside_the_runtime() {
+        let status = std::thread::spawn(|| {
+            let mut command = tokio::process::Command::new("/usr/bin/true");
+            spawn_in_runtime(&mut command).map(|_| ())
+        })
+        .join()
+        .expect("the spawning thread panicked");
+        assert!(status.is_ok());
+    }
 
     #[test]
     fn every_stream_event_kind_is_read() {
