@@ -50,6 +50,8 @@ pub struct Answer {
     pub found: bool,
     #[serde(default)]
     pub sources: Vec<AnswerSource>,
+    #[serde(default)]
+    pub auto: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -309,6 +311,22 @@ mod tests {
         let answers: Vec<Answer> = parse_jsonl(&text);
         assert_eq!(answers.len(), 2);
         assert_eq!(answers[0].id, "a1");
+    }
+
+    #[test]
+    fn an_answer_is_manual_unless_it_says_auto() {
+        let manual: Vec<Answer> = parse_jsonl(
+            r#"{"id":"m1","askedAt":"2026-10-09T05:40:00Z","question":"¿Y en QA?","answer":"Igual.","found":true,"sources":[]}"#,
+        );
+        assert!(!manual[0].auto);
+        let detected: Vec<Answer> = parse_jsonl(
+            r#"{"id":"a2","askedAt":"2026-10-09T05:41:38Z","question":"¿Cómo se despliega bita-desktop?","answer":"Con release.sh.","found":true,"sources":[],"auto":true}"#,
+        );
+        assert!(detected[0].auto);
+        let explicit: Vec<Answer> = parse_jsonl(
+            r#"{"id":"a3","askedAt":"2026-10-09T05:42:00Z","question":"q","answer":"a","found":false,"auto":false}"#,
+        );
+        assert!(!explicit[0].auto);
     }
 
     #[test]
