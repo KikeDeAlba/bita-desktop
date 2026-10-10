@@ -1,16 +1,14 @@
 use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tokio::process::Command;
 
 use crate::cli;
+use crate::docs::Feature;
 use crate::model::{Problem, ProblemKind};
-use crate::state::AppState;
 
 const OPEN: &str = "/usr/bin/open";
-const MIN_CLI: &str = "0.4.0";
-const BACKLOG_CLI: &str = "0.7.0";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,44 +18,35 @@ pub struct CliPayload {
 }
 
 async fn payload(app: &AppHandle, args: &[&str]) -> Result<CliPayload, Problem> {
-    let handle = app.state::<AppState>().require_cli(app).await?;
-    let (data, meta) = handle
-        .call_with_meta::<serde_json::Value>(args)
-        .await
-        .map_err(stale_cli)?;
-    Ok(CliPayload { data, meta })
+    payload_with(app, args, cli::CallOptions::default()).await
 }
 
 pub(crate) async fn payload_with(
-    app: &AppHandle,
+    _app: &AppHandle,
     args: &[&str],
     options: cli::CallOptions,
 ) -> Result<CliPayload, Problem> {
-    let handle = app.state::<AppState>().require_cli(app).await?;
-    let (data, meta) = handle
-        .call_with_options::<serde_json::Value>(args, options)
-        .await
-        .map_err(stale_cli)?;
+    let (data, meta) = crate::docs::call(args, options).await.map_err(newer_database)?;
     Ok(CliPayload {
         data: data.unwrap_or(serde_json::Value::Null),
         meta,
     })
 }
 
-fn stale_cli(problem: Problem) -> Problem {
-    let message = if problem.message.contains("was written by a newer version") {
-        "La base de datos la escribió un bita más nuevo que el CLI instalado.".to_string()
-    } else if problem.message.contains("Unknown command")
-        || problem.message.contains("Usage: bita docs")
-    {
-        format!("El CLI de bita es anterior a la {MIN_CLI} y no sabe leer documentos.")
-    } else {
-        return problem;
-    };
+async fn backlog_payload(app: &AppHandle, args: &[&str]) -> Result<CliPayload, Problem> {
+    crate::docs::require(Feature::Backlog).await?;
+    payload(app, args).await
+}
 
-    Problem::new(ProblemKind::CliTooOld, message).with_hint(Some(
-        "Actualízalo desde Ajustes. Si lo tienes enlazado a un clon, actualiza ese clon.".into(),
-    ))
+fn newer_database(problem: Problem) -> Problem {
+    if !problem.message.contains("was written by a newer version") {
+        return problem;
+    }
+    Problem::new(
+        ProblemKind::CliTooOld,
+        "La base de datos la escribió una versión más nueva que la herramienta instalada.",
+    )
+    .with_hint(Some("Actualiza la herramienta con su comando de instalación.".into()))
 }
 
 #[tauri::command]
@@ -135,7 +124,7 @@ pub async fn notes_search_pages(
         ));
     }
     let args = page_search_args(needle, project.as_deref());
-    payload(&app, &args).await.map_err(stale_pages)
+    payload(&app, &args).await
 }
 
 fn page_search_args<'a>(needle: &'a str, project: Option<&'a str>) -> Vec<&'a str> {
@@ -145,13 +134,6 @@ fn page_search_args<'a>(needle: &'a str, project: Option<&'a str>) -> Vec<&'a st
         args.push(project);
     }
     args
-}
-
-fn stale_pages(problem: Problem) -> Problem {
-    if problem.message.contains("Unknown option") || problem.message.contains("--pages") {
-        return crate::atlassian_cmd::too_old();
-    }
-    problem
 }
 
 #[tauri::command]
@@ -170,7 +152,7 @@ pub async fn backlog_add(
     }
     let page = page_id.map(|id| id.to_string());
     let args = add_args(kind, title, body.as_deref(), page.as_deref(), project.as_deref());
-    payload(&app, &args).await.map_err(stale_backlog)
+    backlog_payload(&app, &args).await
 }
 
 fn add_args<'a>(
@@ -197,9 +179,7 @@ fn add_args<'a>(
 
 #[tauri::command]
 pub async fn backlog_list(app: AppHandle) -> Result<CliPayload, Problem> {
-    payload(&app, &["backlog", "ls", "--status", "all"])
-        .await
-        .map_err(stale_backlog)
+    backlog_payload(&app, &["backlog", "ls", "--status", "all"]).await
 }
 
 #[tauri::command]
@@ -212,7 +192,7 @@ pub async fn backlog_set_status(
     let action = backlog_action(&status)?;
     let id = id.to_string();
     let args = status_args(action, &id, resolution.as_deref());
-    payload(&app, &args).await.map_err(stale_backlog)
+    backlog_payload(&app, &args).await
 }
 
 fn status_args<'a>(action: &'a str, id: &'a str, resolution: Option<&'a str>) -> Vec<&'a str> {
@@ -230,9 +210,7 @@ fn status_args<'a>(action: &'a str, id: &'a str, resolution: Option<&'a str>) ->
 pub async fn backlog_set_kind(app: AppHandle, id: i64, kind: String) -> Result<CliPayload, Problem> {
     let kind = backlog_kind(&kind)?;
     let id = id.to_string();
-    payload(&app, &["backlog", "edit", &id, "--kind", kind])
-        .await
-        .map_err(stale_backlog)
+    backlog_payload(&app, &["backlog", "edit", &id, "--kind", kind]).await
 }
 
 fn backlog_kind(kind: &str) -> Result<&'static str, Problem> {
@@ -255,20 +233,6 @@ fn backlog_action(status: &str) -> Result<&'static str, Problem> {
             format!("No conozco el estado «{other}»."),
         )),
     }
-}
-
-fn stale_backlog(problem: Problem) -> Problem {
-    if problem.kind != ProblemKind::CliTooOld && !problem.message.contains("Unknown command \"backlog\"")
-    {
-        return problem;
-    }
-    Problem::new(
-        ProblemKind::CliTooOld,
-        format!("El CLI de bita es anterior a la {BACKLOG_CLI} y no conoce el backlog."),
-    )
-    .with_hint(Some(
-        "Actualízalo desde Ajustes. Si lo tienes enlazado a un clon, actualiza ese clon.".into(),
-    ))
 }
 
 #[tauri::command]
@@ -324,8 +288,7 @@ pub async fn page_asset(rel_path: String) -> Result<Option<String>, Problem> {
             format!("\"{rel_path}\" no es un asset de bita: {reason}."),
         )
     })?;
-    let target = cli::docs_root().join(candidate);
-    if !target.exists() {
+    if !cli::docs_roots().iter().any(|root| root.join(candidate).exists()) {
         return Ok(None);
     }
     let absolute = resolve_inside(&rel_path, image_shaped)?;
@@ -434,57 +397,32 @@ fn resolve_inside(rel_path: &str, shape: fn(&str) -> Result<&Path, &'static str>
 
     let candidate = shape(rel_path).map_err(refused)?;
 
-    let root = cli::docs_root();
-    let target = root.join(candidate);
-
-    let canonical_root = std::fs::canonicalize(&root).unwrap_or(root);
-    let canonical_target = std::fs::canonicalize(&target)
-        .map_err(|_| refused("el archivo no está donde dice la base"))?;
-
-    if !canonical_target.starts_with(&canonical_root) {
-        return Err(refused("la ruta sale del directorio"));
+    let mut outside = false;
+    for root in cli::docs_roots() {
+        let Ok(canonical_target) = std::fs::canonicalize(root.join(candidate)) else {
+            continue;
+        };
+        let canonical_root = std::fs::canonicalize(&root).unwrap_or(root);
+        if canonical_target.starts_with(&canonical_root) {
+            return Ok(canonical_target);
+        }
+        outside = true;
     }
-    Ok(canonical_target)
+    Err(refused(if outside { "la ruta sale del directorio" } else { "el archivo no está donde dice la base" }))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{doc_shaped, inside_docs_root, stale_cli, MIN_CLI};
+    use super::{doc_shaped, inside_docs_root, newer_database};
     use crate::model::{Problem, ProblemKind};
 
     #[test]
-    fn an_unknown_command_reads_as_a_stale_cli() {
-        let raw = Problem::new(
-            ProblemKind::CliFailed,
-            "Unknown command \"docs\". Run \"bita --help\" for the list. (USAGE_ERROR)",
-        );
-        let mapped = stale_cli(raw);
-
-        assert_eq!(mapped.kind, ProblemKind::CliTooOld);
-        assert!(mapped.message.contains(MIN_CLI));
-        assert!(mapped.hint.is_some());
-    }
-
-    #[test]
-    fn an_unknown_docs_subcommand_reads_as_a_stale_cli() {
-        let raw = Problem::new(
-            ProblemKind::CliFailed,
-            "Usage: bita docs <tree|ls|show|search> (USAGE_ERROR)",
-        );
-        let mapped = stale_cli(raw);
-
-        assert_eq!(mapped.kind, ProblemKind::CliTooOld);
-        assert!(mapped.message.contains(MIN_CLI));
-        assert!(mapped.hint.is_some());
-    }
-
-    #[test]
-    fn a_database_from_the_future_reads_as_a_stale_cli() {
+    fn a_database_from_the_future_reads_as_a_stale_tool() {
         let raw = Problem::new(
             ProblemKind::CliFailed,
             "the database at /x/bita.db was written by a newer version (schema 4, this build understands 3) (UNEXPECTED_ERROR)",
         );
-        let mapped = stale_cli(raw);
+        let mapped = newer_database(raw);
 
         assert_eq!(mapped.kind, ProblemKind::CliTooOld);
         assert!(mapped.message.contains("base de datos"));
@@ -494,21 +432,10 @@ mod tests {
     #[test]
     fn any_other_failure_is_left_alone() {
         let raw = Problem::new(ProblemKind::CliFailed, "No entry #999. (USAGE_ERROR)");
-        let mapped = stale_cli(raw);
+        let mapped = newer_database(raw);
 
         assert_eq!(mapped.kind, ProblemKind::CliFailed);
         assert_eq!(mapped.message, "No entry #999. (USAGE_ERROR)");
-    }
-
-    #[test]
-    fn a_cli_without_backlog_names_the_version_that_has_it() {
-        let raw = Problem::new(
-            ProblemKind::CliFailed,
-            "Unknown command \"docs\". Run \"bita --help\" for the list. (USAGE_ERROR)",
-        );
-        let mapped = super::stale_backlog(stale_cli(raw));
-        assert_eq!(mapped.kind, ProblemKind::CliTooOld);
-        assert!(mapped.message.contains(super::BACKLOG_CLI));
     }
 
     #[test]

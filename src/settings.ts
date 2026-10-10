@@ -1,4 +1,4 @@
-import { describeProblem, installCli, quit, type Check, type Report } from './bita.ts'
+import { copyText, describeProblem, quit, toolsStatus, type Check, type InstallCard, type Report } from './bita.ts'
 import { element, icon } from './dom.ts'
 
 const MARKS: Record<Check['health'], string> = {
@@ -22,6 +22,28 @@ function checkRow(check: Check): HTMLElement {
   return row
 }
 
+function installCard(card: InstallCard): HTMLElement {
+  const box = element('div', 'install-card')
+  box.append(element('p', 'install-card-title', card.title))
+  if (card.purpose !== '') box.append(element('p', 'install-card-note', card.purpose))
+  const row = element('div', 'install-card-row')
+  row.append(element('code', 'install-card-command', card.command))
+  const copy = element('button', 'ghost-button', 'Copiar') as HTMLButtonElement
+  copy.type = 'button'
+  copy.addEventListener('click', () => {
+    void copyText(card.command)
+      .then(() => {
+        copy.textContent = 'Copiado'
+      })
+      .catch((error: unknown) => {
+        copy.textContent = describeProblem(error).message
+      })
+  })
+  row.append(copy)
+  box.append(row)
+  return box
+}
+
 export function renderSettings(
   view: HTMLElement,
   report: Report,
@@ -36,7 +58,7 @@ export function renderSettings(
     element(
       'p',
       'settings-title',
-      report.blocked ? 'Falta algo para poder medir' : 'Todo listo',
+      report.blocked ? 'No encuentro ninguna herramienta' : 'Todo listo',
     ),
   )
   head.append(
@@ -44,8 +66,8 @@ export function renderSettings(
       'p',
       'settings-note',
       report.blocked
-        ? 'La app habla con el CLI de bita. Esto es lo que ha encontrado.'
-        : 'La app habla con el CLI de bita. Esto es lo que está usando.',
+        ? 'Den conecta bita, inkwell, atl y recap cuando están instalados. Instala la que necesites y vuelve aquí.'
+        : 'Den conecta las herramientas que encuentra en el registro. Esto es lo que está usando.',
     ),
   )
   view.append(head)
@@ -54,32 +76,20 @@ export function renderSettings(
   for (const check of report.checks) checks.append(checkRow(check))
   view.append(checks)
 
-  if (report.canInstall) {
-    const install = element('button', 'primary-button wide', 'Instalarlo de verdad') as HTMLButtonElement
-    install.type = 'button'
-    const log = element('pre', 'install-log')
-    log.hidden = true
-
-    install.addEventListener('click', () => {
-      install.disabled = true
-      install.textContent = 'Instalando…'
-      void installCli()
-        .then((output) => {
-          log.hidden = false
-          log.textContent = output
-          install.textContent = 'Instalado'
-          onReload()
-        })
-        .catch((error: unknown) => {
-          log.hidden = false
-          log.textContent = describeProblem(error).message
-          install.disabled = false
-          install.textContent = 'Reintentar'
-        })
-    })
-
-    view.append(install, log)
+  if (report.install.length > 0) {
+    const cards = element('div', 'install-cards')
+    for (const card of report.install) cards.append(installCard(card))
+    view.append(cards)
   }
+
+  const recheck = element('button', 'ghost-button wide', 'Volver a buscar') as HTMLButtonElement
+  recheck.type = 'button'
+  recheck.addEventListener('click', () => {
+    recheck.disabled = true
+    recheck.textContent = 'Buscando…'
+    void toolsStatus(true).finally(onReload)
+  })
+  view.append(recheck)
 
   const live = document.createElement('button')
   live.type = 'button'
@@ -91,7 +101,7 @@ export function renderSettings(
     icon('chevronRight', 13),
   )
   live.addEventListener('click', onLive)
-  view.append(live)
+  if (report.tools.modules.liveAssistant) view.append(live)
 
   const close = element('button', 'ghost-button wide', 'Volver') as HTMLButtonElement
   close.type = 'button'
@@ -100,9 +110,9 @@ export function renderSettings(
 
   const leave = element('div', 'leave')
   leave.append(
-    element('p', 'leave-note', 'bita vive en la barra: no tiene ventana ni icono en el Dock.'),
+    element('p', 'leave-note', 'Den vive en la barra: no tiene ventana ni icono en el Dock.'),
   )
-  const stop = element('button', 'danger-button wide', 'Salir de bita') as HTMLButtonElement
+  const stop = element('button', 'danger-button wide', 'Salir de Den') as HTMLButtonElement
   stop.type = 'button'
   stop.addEventListener('click', () => {
     void quit()

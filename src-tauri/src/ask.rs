@@ -149,7 +149,7 @@ fn emit(app: &AppHandle, ask_id: u64, event: StreamEvent) {
 fn unsupported() -> StreamEvent {
     StreamEvent::Error {
         code: "UNSUPPORTED".into(),
-        message: "Esta versión de recap no sabe responder en vivo: hace falta la 0.5 o posterior.".into(),
+        message: "recap no contestó con el formato del asistente en vivo.".into(),
     }
 }
 
@@ -166,7 +166,11 @@ pub fn start(app: &AppHandle, question: Option<String>) -> Result<u64, Problem> 
     let (sender, receiver) = oneshot::channel();
     *RUNNING.lock().expect("ask poisoned") = Some(Running { id, cancel: sender });
 
-    let mut command = recap_command(&recap, &assistant_path());
+    let path = assistant_path(&recap);
+    let Some(mut command) = recap_command(&recap, Some(path)) else {
+        finish(id);
+        return Err(crate::recap::missing());
+    };
     command
         .args(ask_args(question.as_deref()))
         .stdout(Stdio::piped())

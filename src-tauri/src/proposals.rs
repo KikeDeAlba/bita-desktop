@@ -2,18 +2,17 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::ask::Answer;
+use crate::cli::CallOptions;
+use crate::docs::Feature;
 use crate::model::{Problem, ProblemKind};
-use crate::recap::{recap_call, RecapError};
-use crate::state::AppState;
+use crate::recap::recap_call;
 
 const RECAP_TIMEOUT: Duration = Duration::from_secs(60);
 const SHOW_TIMEOUT: Duration = Duration::from_secs(20);
 const BRANCH_PREFIX: &str = "proposal/meeting-";
-const GIT_DOCS_CLI: &str = "0.16.0";
-const LIVE_RECAP: &str = "0.5.0";
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -209,36 +208,16 @@ fn ended_at(data: &Value) -> Option<String> {
     Some((start + chrono::Duration::seconds(seconds)).to_rfc3339())
 }
 
-fn needs_git_docs(problem: Problem) -> Problem {
-    let stale = problem.kind == ProblemKind::CliTooOld
-        || problem.message.contains("Unknown command")
-        || problem.message.contains("Unknown subcommand")
-        || problem.message.contains("Usage: bita docs")
-        || problem.message.contains("USAGE_ERROR");
-    if !stale {
-        return problem;
-    }
-    Problem::new(
-        ProblemKind::CliTooOld,
-        format!("El CLI de bita es anterior a la {GIT_DOCS_CLI} y no guarda el historial de las páginas."),
-    )
-    .with_hint(Some("pnpm add -g @kikedealba/bita@latest".into()))
+async fn docs<T: for<'de> Deserialize<'de>>(feature: Feature, args: &[&str]) -> Result<T, Problem> {
+    crate::docs::require(feature).await?;
+    let (data, _) = crate::docs::call(args, CallOptions::default()).await?;
+    serde_json::from_value(data.unwrap_or(Value::Null))
+        .map_err(|error| Problem::new(ProblemKind::Unreadable, format!("No entiendo la respuesta de los docs: {error}")))
 }
 
-fn needs_live_recap(error: RecapError) -> Problem {
-    match error {
-        RecapError::Failed(problem) if problem.kind == ProblemKind::Unreadable => Problem::new(
-            ProblemKind::CliTooOld,
-            format!("recap es anterior a la {LIVE_RECAP} y no conoce los cambios propuestos."),
-        )
-        .with_hint(Some("bita setup".into())),
-        other => other.into(),
-    }
-}
-
-async fn bita<T: for<'de> Deserialize<'de>>(app: &AppHandle, args: &[&str]) -> Result<T, Problem> {
-    let cli = app.state::<AppState>().require_cli(app).await?;
-    cli.call::<T>(args).await.map_err(needs_git_docs)
+async fn recap(args: &[&str], limit: Duration) -> Result<Value, Problem> {
+    crate::docs::require(Feature::Meetings).await?;
+    recap_call(args, limit).await.map_err(Problem::from)
 }
 
 fn valid_rev(rev: &str) -> Result<&str, Problem> {
@@ -282,30 +261,30 @@ fn proposal_of(data: Value) -> Result<Proposal, Problem> {
 }
 
 #[tauri::command]
-pub async fn docs_branch_diff(app: AppHandle, branch: String, sha: String) -> Result<BranchDiff, Problem> {
+pub async fn docs_branch_diff(branch: String, sha: String) -> Result<BranchDiff, Problem> {
     let branch = valid_branch(&branch)?;
     let sha = valid_rev(&sha)?;
-    bita(&app, &["docs", "branch", "diff", branch, "--commit", sha]).await
+    docs(Feature::History, &["docs", "branch", "diff", branch, "--commit", sha]).await
 }
 
 #[tauri::command]
-pub async fn page_history(app: AppHandle, page_id: i64) -> Result<PageHistory, Problem> {
+pub async fn page_history(page_id: i64) -> Result<PageHistory, Problem> {
     let id = page_id.to_string();
-    bita(&app, &["docs", "page", "history", &id]).await
+    docs(Feature::History, &["docs", "page", "history", &id]).await
 }
 
 #[tauri::command]
-pub async fn page_diff(app: AppHandle, page_id: i64, rev: String) -> Result<PageDiff, Problem> {
+pub async fn page_diff(page_id: i64, rev: String) -> Result<PageDiff, Problem> {
     let id = page_id.to_string();
     let rev = valid_rev(&rev)?;
-    bita(&app, &["docs", "page", "diff", &id, rev]).await
+    docs(Feature::History, &["docs", "page", "diff", &id, rev]).await
 }
 
 #[tauri::command]
 pub async fn page_restore(app: AppHandle, page_id: i64, sha: String) -> Result<Value, Problem> {
     let id = page_id.to_string();
     let sha = valid_rev(&sha)?;
-    let result = bita::<Value>(&app, &["docs", "page", "restore", &id, sha]).await?;
+    let result = docs::<Value>(Feature::History, &["docs", "page", "restore", &id, sha]).await?;
     crate::notes::mark_stale(&app);
     Ok(result)
 }
@@ -335,11 +314,11 @@ pub async fn proposal_accept(
         args.push("--md");
         args.push(path);
     }
-    let outcome = recap_call(&args, RECAP_TIMEOUT).await;
+    let outcome = recap(&args, RECAP_TIMEOUT).await;
     if let Some(path) = edited {
         let _ = std::fs::remove_file(path);
     }
-    let proposal = proposal_of(outcome.map_err(needs_live_recap)?)?;
+    let proposal = proposal_of(outcome?)?;
     crate::notes::mark_stale(&app);
     Ok(proposal)
 }
@@ -356,9 +335,7 @@ pub fn detail_of(data: Value) -> Result<ProposalDetail, Problem> {
 pub async fn proposal_show(meeting_id: String, n: i64) -> Result<ProposalDetail, Problem> {
     let meeting = valid_meeting(&meeting_id)?;
     let number = n.to_string();
-    let data = recap_call(&["proposals", "show", meeting, &number], RECAP_TIMEOUT)
-        .await
-        .map_err(needs_live_recap)?;
+    let data = recap(&["proposals", "show", meeting, &number], RECAP_TIMEOUT).await?;
     detail_of(data)
 }
 
@@ -366,15 +343,13 @@ pub async fn proposal_show(meeting_id: String, n: i64) -> Result<ProposalDetail,
 pub async fn proposal_reject(meeting_id: String, n: i64) -> Result<Proposal, Problem> {
     let meeting = valid_meeting(&meeting_id)?;
     let number = n.to_string();
-    let data = recap_call(&["proposals", "reject", meeting, &number], RECAP_TIMEOUT)
-        .await
-        .map_err(needs_live_recap)?;
+    let data = recap(&["proposals", "reject", meeting, &number], RECAP_TIMEOUT).await?;
     proposal_of(data)
 }
 
 #[tauri::command]
-pub async fn pending_proposals(app: AppHandle) -> Result<Vec<PendingMeeting>, Problem> {
-    let list = match bita::<BranchList>(&app, &["docs", "branch", "ls"]).await {
+pub async fn pending_proposals() -> Result<Vec<PendingMeeting>, Problem> {
+    let list = match docs::<BranchList>(Feature::Proposals, &["docs", "branch", "ls"]).await {
         Ok(list) => list,
         Err(_) => return Ok(Vec::new()),
     };
@@ -407,10 +382,9 @@ pub async fn pending_proposals(app: AppHandle) -> Result<Vec<PendingMeeting>, Pr
 #[cfg(test)]
 mod tests {
     use super::{
-        detail_of, ended_at, extras_of, needs_git_docs, pending_only, proposal_entry, proposal_of, valid_branch, valid_rev,
+        detail_of, ended_at, extras_of, pending_only, proposal_entry, proposal_of, valid_branch, valid_rev,
         BranchDiff, PageDiff, PageHistory,
     };
-    use crate::model::{Problem, ProblemKind};
     use serde_json::json;
 
     fn show_payload() -> serde_json::Value {
@@ -551,17 +525,5 @@ mod tests {
         assert!(valid_branch("proposal/meeting-733").is_ok());
         assert!(valid_branch("--force").is_err());
         assert!(valid_branch("a/../b").is_err());
-    }
-
-    #[test]
-    fn an_older_cli_is_told_to_update_for_history() {
-        let stale = needs_git_docs(Problem::new(
-            ProblemKind::CliFailed,
-            "Unknown command \"history\". Run \"bita --help\" for the list. (USAGE_ERROR)",
-        ));
-        assert_eq!(stale.kind, ProblemKind::CliTooOld);
-        assert!(stale.message.contains("0.16.0"));
-        let other = needs_git_docs(Problem::new(ProblemKind::CliFailed, "MERGE_CONFLICT"));
-        assert_eq!(other.kind, ProblemKind::CliFailed);
     }
 }

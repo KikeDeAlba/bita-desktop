@@ -16,6 +16,10 @@ const DOCS_DEBOUNCE: Duration = Duration::from_millis(400);
 type Fingerprint = Option<(SystemTime, u64)>;
 
 pub fn spawn(app: AppHandle, database: PathBuf) -> bool {
+    spawn_database(app, database, true)
+}
+
+pub fn spawn_database(app: AppHandle, database: PathBuf, refreshes_timers: bool) -> bool {
     let Some(directory) = database.parent().map(Path::to_path_buf) else {
         return false;
     };
@@ -48,7 +52,9 @@ pub fn spawn(app: AppHandle, database: PathBuf) -> bool {
 
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
-                handle.state::<AppState>().refresh(&handle).await;
+                if refreshes_timers {
+                    handle.state::<AppState>().refresh(&handle).await;
+                }
                 crate::notes::mark_stale(&handle);
             });
         }

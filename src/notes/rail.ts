@@ -41,6 +41,8 @@ export interface RailState {
   backlogOpen: number | null
   meetingCount: number
   storageBytes: number | null
+  showBacklog: boolean
+  showMeetings: boolean
 }
 
 export function spaceKey(space: Space): string {
@@ -74,8 +76,8 @@ export function renderRail(host: HTMLElement, state: RailState, handlers: RailHa
     renderResults(parts.body, state, handlers)
     return
   }
-  parts.body.append(fixedRow('inbox', 'Pendientes y hallazgos', state.backlogOpen, state.selected?.kind === 'backlog', handlers.onSelectBacklog))
-  parts.body.append(fixedRow('calendar', 'Reuniones', state.meetingCount, state.selected?.kind === 'meetings', handlers.onSelectMeetings))
+  if (state.showBacklog) parts.body.append(fixedRow('inbox', 'Pendientes y hallazgos', state.backlogOpen, state.selected?.kind === 'backlog', handlers.onSelectBacklog))
+  if (state.showMeetings) parts.body.append(fixedRow('calendar', 'Reuniones', state.meetingCount, state.selected?.kind === 'meetings', handlers.onSelectMeetings))
   renderTree(parts.body, state, handlers)
 }
 
@@ -239,10 +241,12 @@ function collapsedStrip(state: RailState, handlers: RailHandlers): HTMLElement {
   unfold.addEventListener('click', handlers.onExpand)
   strip.append(unfold)
 
-  for (const [glyph, label, run] of [
-    ['inbox', 'Pendientes y hallazgos', handlers.onSelectBacklog],
-    ['calendar', 'Reuniones', handlers.onSelectMeetings],
-  ] as const) {
+  const shortcuts = [
+    ['inbox', 'Pendientes y hallazgos', handlers.onSelectBacklog, state.showBacklog],
+    ['calendar', 'Reuniones', handlers.onSelectMeetings, state.showMeetings],
+  ] as const
+  for (const [glyph, label, run, shown] of shortcuts) {
+    if (!shown) continue
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'strip-icon'

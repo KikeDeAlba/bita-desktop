@@ -6,6 +6,9 @@ import {
   openNotesMeeting,
   recapConfig,
   recapConfigSet,
+  toolsStatus,
+  installHint,
+  type ToolsStatus,
   type LiveConfig,
   type LiveTimer,
   type LiveView,
@@ -162,6 +165,7 @@ interface SettingsState {
   capturing: boolean
   failure: string | null
   repos: { slug: string; exists: boolean }[] | null
+  tools: ToolsStatus | null
 }
 
 export function renderLiveSettings(
@@ -170,7 +174,7 @@ export function renderLiveSettings(
   project: string | null,
   onBack: () => void,
 ): void {
-  const state: SettingsState = { config: null, loaded: false, shortcut, capturing: false, failure: null, repos: null }
+  const state: SettingsState = { config: null, loaded: false, shortcut, capturing: false, failure: null, repos: null, tools: null }
 
   const paint = (): void => {
     host.replaceChildren()
@@ -191,14 +195,22 @@ export function renderLiveSettings(
     }
 
     if (state.loaded && state.config === null) {
+      const missing = state.tools !== null && !state.tools.modules.liveAssistant
       const box = element('div', 'problem')
-      box.append(element('p', 'problem-message', 'El recap instalado no tiene asistente en vivo: hace falta la 0.5 o posterior.'))
-      box.append(element('code', 'problem-hint', 'bita setup'))
+      box.append(
+        element(
+          'p',
+          'problem-message',
+          missing ? 'Para el asistente de reunión hace falta instalar recap.' : 'recap no devolvió los ajustes del asistente.',
+        ),
+      )
+      box.append(element('code', 'problem-hint', installHint(state.tools, 'recap')))
       host.append(box)
     }
 
     const config = state.config
     const off = config === null
+    const autoAskOff = state.tools !== null && !state.tools.modules.autoAsk
     const group = element('div', 'live-settings-group')
     group.append(
       settingRow(
@@ -213,13 +225,13 @@ export function renderLiveSettings(
       ),
       settingRow(
         'Detectar preguntas automáticamente',
-        config !== null && config.autoAsk === null
-          ? 'hace falta recap 0.6 o posterior'
+        autoAskOff
+          ? 'tu versión de recap no ofrece la detección automática'
           : 'responde solo, sin el atajo, lo que se pueda contestar con las páginas o el código',
         toggle(
           'Detectar preguntas automáticamente',
           config?.autoAsk ?? false,
-          off || config.autoAsk === null,
+          off || autoAskOff,
           (next) => change('live.autoAsk', next),
         ),
       ),
@@ -235,7 +247,7 @@ export function renderLiveSettings(
         ),
       )
     }
-    group.append(settingRow('Atajo para responder', 'funciona aunque bita no tenga el foco', shortcutButton(), true))
+    group.append(settingRow('Atajo para responder', 'funciona aunque Den no tenga el foco', shortcutButton(), true))
     host.append(group)
 
     const sources = element('div', 'live-settings-section')
@@ -326,6 +338,14 @@ export function renderLiveSettings(
   }
 
   paint()
+  void toolsStatus()
+    .then((status) => {
+      state.tools = status
+    })
+    .catch(() => {
+      state.tools = null
+    })
+    .finally(paint)
   void recapConfig()
     .then((config) => {
       state.config = config

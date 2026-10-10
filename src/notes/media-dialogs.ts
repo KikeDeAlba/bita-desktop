@@ -345,7 +345,7 @@ export function openCompressDialog(
       element(
         'p',
         'mdlg-note mdlg-pad',
-        'Se comprime en segundo plano y el original se reemplaza solo cuando el nuevo archivo se verifica completo. Puedes seguir usando bita mientras tanto.',
+        'Se comprime en segundo plano y el original se reemplaza solo cuando el nuevo archivo se verifica completo. Puedes seguir usando Den mientras tanto.',
       ),
     )
     if (phase === 'failed') nodes.push(errorLine(message))

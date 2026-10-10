@@ -279,8 +279,8 @@ function paintBar(): void {
   badge.title = 'Esta ventana no aparece cuando compartes pantalla'
   badge.append(icon('eyeOff', 12), element('span', '', 'Privada'))
   bar.replaceChildren(dot, title, sub, clock, spacer, badge)
-  if (config !== null && config.autoAsk !== null) {
-    const on = config.autoAsk
+  if (config !== null) {
+    const on = config.autoAsk === true
     const status = document.createElement('button')
     status.type = 'button'
     status.className = on ? 'wide-detect wide-detect--on' : 'wide-detect'

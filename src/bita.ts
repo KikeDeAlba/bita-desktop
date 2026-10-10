@@ -11,10 +11,10 @@ export const LIVE_STATE_EVENT = 'bita://live-state'
 export const LIVE_TRANSCRIPT_EVENT = 'bita://live-transcript'
 export const LIVE_SETTINGS_EVENT = 'bita://live-settings'
 export const NOTES_MEETING_EVENT = 'bita://notes-meeting'
+export const TOOLS_EVENT = 'bita://tools-changed'
 
 export type ProblemKind =
-  | 'node-missing'
-  | 'cli-missing'
+  | 'tool-missing'
   | 'cli-too-old'
   | 'schema-mismatch'
   | 'cli-failed'
@@ -193,18 +193,91 @@ export interface Check {
   note: string | null
 }
 
+export interface InstallCard {
+  tool: ToolName
+  title: string
+  purpose: string
+  command: string
+}
+
 export interface Report {
   checks: Check[]
-  canInstall: boolean
+  install: InstallCard[]
   blocked: boolean
+  tools: ToolsStatus
 }
 
 export function doctorReport(): Promise<Report> {
   return invoke<Report>('doctor_report')
 }
 
-export function installCli(): Promise<string> {
-  return invoke<string>('install_cli')
+export type ToolName = 'bita' | 'inkwell' | 'atl' | 'recap'
+
+export type ToolState = 'ready' | 'unresponsive' | 'broken-bin' | 'missing'
+
+export interface ToolStatus {
+  name: string
+  known: boolean
+  state: ToolState
+  version: string | null
+  capabilities: string[]
+  verified: boolean
+  origin: 'registry' | 'override' | null
+  command: string | null
+  manifest: string | null
+  install: string
+  purpose: string | null
+}
+
+export interface Modules {
+  timers: boolean
+  notes: boolean
+  backlog: boolean
+  history: boolean
+  proposals: boolean
+  atlassian: boolean
+  confluenceSync: boolean
+  meetings: boolean
+  liveAssistant: boolean
+  autoAsk: boolean
+  meetingKinds: boolean
+}
+
+export interface ToolsStatus {
+  registryDir: string
+  tools: ToolStatus[]
+  invalid: { file: string; problems: string[] }[]
+  modules: Modules
+  docs: 'inkwell' | 'bita' | null
+  inkwellMigrated: boolean | null
+}
+
+export const NO_MODULES: Modules = {
+  timers: false,
+  notes: false,
+  backlog: false,
+  history: false,
+  proposals: false,
+  atlassian: false,
+  confluenceSync: false,
+  meetings: false,
+  liveAssistant: false,
+  autoAsk: false,
+  meetingKinds: false,
+}
+
+export function toolsStatus(refresh = false): Promise<ToolsStatus> {
+  return invoke<ToolsStatus>('tools_status', { refresh })
+}
+
+export function onToolsChanged(handler: (status: ToolsStatus) => void): void {
+  void listen<ToolsStatus>(TOOLS_EVENT, (event) => {
+    handler(event.payload)
+  })
+}
+
+export function installHint(status: ToolsStatus | null, tool: ToolName): string {
+  return status?.tools.find((found) => found.name === tool)?.install ?? `npm i -g @kikedealba/${tool} && ${tool} setup`
 }
 
 export function openNotes(entryId: number | null): Promise<void> {

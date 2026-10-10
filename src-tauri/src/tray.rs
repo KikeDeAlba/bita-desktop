@@ -22,8 +22,8 @@ const MAX_LABEL_CHARS: usize = 12;
 const UNNAMED: &str = "sin nombre";
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, OPEN, "Abrir bita", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, QUIT, "Salir de bita", true, Some("Cmd+Q"))?;
+    let open = MenuItem::with_id(app, OPEN, "Abrir Den", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT, "Salir de Den", true, Some("Cmd+Q"))?;
     let live = MenuItem::with_id(app, LIVE, "Asistente de reunión", true, None::<&str>)?;
     let wide = MenuItem::with_id(app, LIVE_WIDE, "Ventana amplia", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &live, &wide, &PredefinedMenuItem::separator(app)?, &quit])?;
@@ -31,7 +31,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     TrayIconBuilder::with_id(ID)
         .icon(Image::from_bytes(TEMPLATE_ICON)?)
         .icon_as_template(true)
-        .tooltip("bita — clic para abrir, clic derecho para salir")
+        .tooltip("Den — clic para abrir, clic derecho para salir")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
