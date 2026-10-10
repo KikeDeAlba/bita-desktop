@@ -66,7 +66,7 @@ export function renderSettings(
       'p',
       'settings-note',
       report.blocked
-        ? 'Den conecta bita, inkwell, atl y recap cuando están instalados. Instala la que necesites y vuelve aquí.'
+        ? 'Den conecta bita, inkwell, tally, atl y recap cuando están instalados. Instala la que necesites y vuelve aquí.'
         : 'Den conecta las herramientas que encuentra en el registro. Esto es lo que está usando.',
     ),
   )

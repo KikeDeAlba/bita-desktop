@@ -17,7 +17,7 @@ use crate::platform;
 pub const REGISTRY_ENV: &str = "KIT_REGISTRY_DIR";
 pub const MANIFEST_VERSION: u64 = 1;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
-const PASSTHROUGH_PREFIXES: [&str; 6] = ["KIT_", "XDG_", "BITA_", "INKWELL_", "RECAP_", "ATL_"];
+const PASSTHROUGH_PREFIXES: [&str; 7] = ["KIT_", "XDG_", "BITA_", "INKWELL_", "RECAP_", "ATL_", "TALLY_"];
 const PASSTHROUGH_VARS: [&str; 9] = [
     "APPDATA",
     "LOCALAPPDATA",
@@ -156,17 +156,19 @@ pub fn inkwell_docs_root() -> PathBuf {
 pub enum Tool {
     Bita,
     Inkwell,
+    Tally,
     Atl,
     Recap,
 }
 
-pub const KNOWN: [Tool; 4] = [Tool::Bita, Tool::Inkwell, Tool::Atl, Tool::Recap];
+pub const KNOWN: [Tool; 5] = [Tool::Bita, Tool::Inkwell, Tool::Tally, Tool::Atl, Tool::Recap];
 
 impl Tool {
     pub fn name(self) -> &'static str {
         match self {
             Tool::Bita => "bita",
             Tool::Inkwell => "inkwell",
+            Tool::Tally => "tally",
             Tool::Atl => "atl",
             Tool::Recap => "recap",
         }
@@ -180,6 +182,7 @@ impl Tool {
         match self {
             Tool::Bita => "BITA_CLI",
             Tool::Inkwell => "INKWELL_CLI",
+            Tool::Tally => "TALLY_CLI",
             Tool::Atl => "ATL_CLI",
             Tool::Recap => "RECAP_CLI",
         }
@@ -187,13 +190,14 @@ impl Tool {
 
     pub fn default_install(self) -> String {
         let name = self.name();
-        format!("npm i -g @kikedealba/{name} && {name} setup")
+        format!("npm install -g @kikedealba/{name} && {name} setup")
     }
 
     pub fn purpose(self) -> &'static str {
         match self {
-            Tool::Bita => "Cronómetros, el resumen de Hoy y lo pendiente de pasar a Jira.",
-            Tool::Inkwell => "Las páginas de documentación, el backlog y el historial de cada página.",
+            Tool::Bita => "Los cronómetros y el resumen de Hoy.",
+            Tool::Inkwell => "Las páginas de documentación, el backlog, el historial, las notas de cada cronómetro y la sincronización con Confluence.",
+            Tool::Tally => "Lo pendiente de pasar a Jira: agrupa el tiempo medido y lleva la cuenta de lo ya registrado.",
             Tool::Atl => "Las conexiones con Jira y Confluence.",
             Tool::Recap => "Grabar reuniones, la minuta y el asistente en vivo.",
         }
@@ -201,7 +205,7 @@ impl Tool {
 
     fn assumed_capabilities(self) -> Vec<String> {
         let list: &[&str] = match self {
-            Tool::Bita => &["time.entries.read", "time.entries.write", "time.notes", "time.events"],
+            Tool::Bita => &["time.entries.read", "time.entries.write", "time.events"],
             Tool::Inkwell => &[
                 "docs.page.read",
                 "docs.page.write",
@@ -211,7 +215,9 @@ impl Tool {
                 "docs.diagrams",
                 "docs.export.pdf",
                 "docs.confluence.sync",
+                "docs.entry-notes",
             ],
+            Tool::Tally => &["timesheet.summary", "timesheet.map", "timesheet.link"],
             Tool::Atl => &["jira.issue.read", "jira.issue.write", "confluence.page.read", "confluence.page.write"],
             Tool::Recap => &[],
         };
@@ -631,27 +637,14 @@ impl ToolStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum DocsProvider {
-    Inkwell,
-    Bita,
-}
-
-impl DocsProvider {
-    pub fn tool(self) -> Tool {
-        match self {
-            DocsProvider::Inkwell => Tool::Inkwell,
-            DocsProvider::Bita => Tool::Bita,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Modules {
     pub timers: bool,
+    pub hoy: bool,
+    pub jira: bool,
     pub notes: bool,
+    pub entry_notes: bool,
     pub backlog: bool,
     pub history: bool,
     pub proposals: bool,
@@ -665,40 +658,25 @@ pub struct Modules {
 
 pub type ReadyTools = HashMap<Tool, Vec<String>>;
 
-pub fn docs_provider(ready: &ReadyTools, inkwell_migrated: bool) -> Option<DocsProvider> {
-    let inkwell = ready
-        .get(&Tool::Inkwell)
-        .is_some_and(|caps| caps.iter().any(|cap| cap == "docs.page.read"));
-    let bita = ready.contains_key(&Tool::Bita);
-    match (inkwell, bita) {
-        (true, true) if inkwell_migrated => Some(DocsProvider::Inkwell),
-        (_, true) => Some(DocsProvider::Bita),
-        (true, false) => Some(DocsProvider::Inkwell),
-        (false, false) => None,
-    }
-}
-
-pub fn modules(ready: &ReadyTools, docs: Option<DocsProvider>) -> Modules {
+pub fn modules(ready: &ReadyTools) -> Modules {
     let has = |tool: Tool, capability: &str| {
         ready
             .get(&tool)
             .is_some_and(|caps| caps.iter().any(|cap| cap == capability))
     };
-    let docs_can = |capability: &str| match docs {
-        Some(DocsProvider::Inkwell) => has(Tool::Inkwell, capability),
-        Some(DocsProvider::Bita) => true,
-        None => false,
-    };
     let bita = ready.contains_key(&Tool::Bita);
     let recap = ready.contains_key(&Tool::Recap);
     Modules {
         timers: bita,
-        notes: docs.is_some(),
-        backlog: docs_can("docs.backlog"),
-        history: docs_can("docs.history"),
-        proposals: recap && docs_can("docs.propose"),
-        atlassian: bita || ready.contains_key(&Tool::Atl),
-        confluence_sync: docs_can("docs.confluence.sync"),
+        hoy: bita,
+        jira: has(Tool::Tally, "timesheet.summary"),
+        notes: has(Tool::Inkwell, "docs.page.read"),
+        entry_notes: has(Tool::Inkwell, "docs.entry-notes"),
+        backlog: has(Tool::Inkwell, "docs.backlog"),
+        history: has(Tool::Inkwell, "docs.history"),
+        proposals: recap && has(Tool::Inkwell, "docs.propose"),
+        atlassian: ready.contains_key(&Tool::Atl),
+        confluence_sync: has(Tool::Inkwell, "docs.confluence.sync"),
         meetings: recap,
         live_assistant: recap,
         auto_ask: recap,
@@ -713,7 +691,6 @@ pub struct ToolsStatus {
     pub tools: Vec<ToolStatus>,
     pub invalid: Vec<Invalid>,
     pub modules: Modules,
-    pub docs: Option<DocsProvider>,
     pub inkwell_migrated: Option<bool>,
 }
 
@@ -834,18 +811,16 @@ pub fn status_from(
                 .manifest
                 .install
                 .clone()
-                .unwrap_or_else(|| format!("npm i -g @kikedealba/{0} && {0} setup", located.file)),
+                .unwrap_or_else(|| format!("npm install -g @kikedealba/{0} && {0} setup", located.file)),
             purpose: located.manifest.description.clone(),
         });
     }
     let migrated = if ready.contains_key(&Tool::Inkwell) { inkwell_migrated } else { None };
-    let docs = docs_provider(&ready, migrated.unwrap_or(false));
     ToolsStatus {
         registry_dir: dir.display().to_string(),
         tools,
         invalid: scan.invalid.clone(),
-        modules: modules(&ready, docs),
-        docs,
+        modules: modules(&ready),
         inkwell_migrated: migrated,
     }
 }
@@ -1223,43 +1198,49 @@ mod tests {
             .collect()
     }
 
-    const INKWELL_CAPS: &[&str] = &["docs.page.read", "docs.page.write", "docs.backlog", "docs.history", "docs.propose", "docs.confluence.sync"];
+    const INKWELL_CAPS: &[&str] = &[
+        "docs.page.read",
+        "docs.page.write",
+        "docs.backlog",
+        "docs.history",
+        "docs.propose",
+        "docs.confluence.sync",
+        "docs.entry-notes",
+    ];
+    const TALLY_CAPS: &[&str] = &["timesheet.summary", "timesheet.map", "timesheet.link"];
 
     #[test]
-    fn docs_prefer_a_migrated_inkwell_and_otherwise_bita() {
-        let both = ready(&[(Tool::Bita, &[]), (Tool::Inkwell, INKWELL_CAPS)]);
-        assert_eq!(docs_provider(&both, true), Some(DocsProvider::Inkwell));
-        assert_eq!(docs_provider(&both, false), Some(DocsProvider::Bita));
-        let alone = ready(&[(Tool::Inkwell, INKWELL_CAPS)]);
-        assert_eq!(docs_provider(&alone, false), Some(DocsProvider::Inkwell));
-        let bita = ready(&[(Tool::Bita, &[])]);
-        assert_eq!(docs_provider(&bita, true), Some(DocsProvider::Bita));
-        let unreadable = ready(&[(Tool::Inkwell, &["docs.export.pdf"])]);
-        assert_eq!(docs_provider(&unreadable, true), None);
-        assert_eq!(docs_provider(&ReadyTools::new(), true), None);
+    fn bita_alone_only_measures_time() {
+        let only_bita = modules(&ready(&[(Tool::Bita, &["time.entries.read"])]));
+        assert!(only_bita.timers && only_bita.hoy);
+        assert!(!only_bita.jira && !only_bita.notes && !only_bita.entry_notes);
+        assert!(!only_bita.backlog && !only_bita.history && !only_bita.proposals);
+        assert!(!only_bita.atlassian && !only_bita.confluence_sync);
+        assert!(!only_bita.meetings && !only_bita.live_assistant && !only_bita.meeting_kinds);
     }
 
     #[test]
-    fn modules_follow_the_tools_that_answer() {
-        let nothing = modules(&ReadyTools::new(), None);
-        assert_eq!(nothing, Modules::default());
+    fn each_module_follows_the_tool_that_owns_it() {
+        assert_eq!(modules(&ReadyTools::new()), Modules::default());
 
-        let bita = ready(&[(Tool::Bita, &[])]);
-        let only_bita = modules(&bita, docs_provider(&bita, false));
-        assert!(only_bita.timers && only_bita.notes && only_bita.backlog && only_bita.history && only_bita.atlassian);
-        assert!(!only_bita.meetings && !only_bita.live_assistant && !only_bita.meeting_kinds && !only_bita.proposals);
+        let trio = modules(&ready(&[(Tool::Bita, &[]), (Tool::Inkwell, INKWELL_CAPS), (Tool::Tally, TALLY_CAPS)]));
+        assert!(trio.timers && trio.hoy && trio.jira);
+        assert!(trio.notes && trio.entry_notes && trio.backlog && trio.history && trio.confluence_sync);
+        assert!(!trio.proposals && !trio.atlassian && !trio.meetings);
 
-        let with_recap = ready(&[(Tool::Bita, &[]), (Tool::Recap, &[])]);
-        let both = modules(&with_recap, docs_provider(&with_recap, false));
-        assert!(both.meetings && both.live_assistant && both.auto_ask && both.meeting_kinds && both.proposals);
+        let with_recap = modules(&ready(&[(Tool::Bita, &[]), (Tool::Inkwell, INKWELL_CAPS), (Tool::Recap, &[])]));
+        assert!(with_recap.meetings && with_recap.live_assistant && with_recap.auto_ask);
+        assert!(with_recap.meeting_kinds && with_recap.proposals);
 
-        let partial = ready(&[(Tool::Inkwell, &["docs.page.read"])]);
-        let inkwell = modules(&partial, docs_provider(&partial, false));
-        assert!(inkwell.notes);
-        assert!(!inkwell.backlog && !inkwell.history && !inkwell.confluence_sync && !inkwell.timers && !inkwell.atlassian);
+        let partial = modules(&ready(&[(Tool::Inkwell, &["docs.page.read"])]));
+        assert!(partial.notes);
+        assert!(!partial.entry_notes && !partial.backlog && !partial.history && !partial.confluence_sync);
+        assert!(!partial.timers && !partial.hoy && !partial.atlassian);
 
-        let atl = ready(&[(Tool::Atl, &["jira.issue.read"])]);
-        assert!(modules(&atl, None).atlassian);
+        let tally_without_summary = modules(&ready(&[(Tool::Tally, &["timesheet.link"])]));
+        assert!(!tally_without_summary.jira);
+
+        assert!(modules(&ready(&[(Tool::Atl, &["jira.issue.read"])])).atlassian);
     }
 
     #[cfg(unix)]
@@ -1299,13 +1280,18 @@ esac"#
         let status = registry.status().await;
         assert_eq!(status.modules, Modules::default());
         assert!(status.tools.iter().all(|tool| tool.state == ToolState::Missing));
-        assert_eq!(status.tool(Tool::Recap).expect("recap").install, "npm i -g @kikedealba/recap && recap setup");
+        assert_eq!(status.tool(Tool::Recap).expect("recap").install, "npm install -g @kikedealba/recap && recap setup");
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
+    fn quoted(caps: &[&str]) -> String {
+        caps.iter().map(|cap| format!("\"{cap}\"")).collect::<Vec<_>>().join(",")
+    }
+
+    #[cfg(unix)]
     #[tokio::test(flavor = "current_thread")]
-    async fn a_registry_with_bita_alone_shows_timers_and_docs() {
+    async fn a_registry_with_bita_alone_shows_timers_and_hoy_only() {
         let dir = scratch("bita-alone");
         let bita = fake_tool(&dir, "bita", &capabilities_script("bita", r#""time.entries.read","time.entries.write""#));
         register(&dir, "bita", &bita, &["time.entries.read"]);
@@ -1315,9 +1301,36 @@ esac"#
         assert_eq!(found.state, ToolState::Ready);
         assert!(found.verified);
         assert_eq!(found.version.as_deref(), Some("9.9.9"));
-        assert_eq!(status.docs, Some(DocsProvider::Bita));
-        assert!(status.modules.timers && status.modules.notes && status.modules.atlassian);
+        assert!(status.modules.timers && status.modules.hoy);
+        assert!(!status.modules.jira && !status.modules.notes && !status.modules.entry_notes);
+        assert!(!status.modules.backlog && !status.modules.atlassian && !status.modules.confluence_sync);
         assert!(!status.modules.meetings && !status.modules.meeting_kinds);
+        assert_eq!(status.tool(Tool::Tally).expect("tally").state, ToolState::Missing);
+        assert_eq!(
+            status.tool(Tool::Tally).expect("tally").install,
+            "npm install -g @kikedealba/tally && tally setup"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn bita_inkwell_and_tally_turn_on_their_modules() {
+        let dir = scratch("trio");
+        let bita = fake_tool(&dir, "bita", &capabilities_script("bita", r#""time.entries.read""#));
+        let inkwell = fake_tool(&dir, "inkwell", &capabilities_script("inkwell", &quoted(INKWELL_CAPS)));
+        let tally = fake_tool(&dir, "tally", &capabilities_script("tally", &quoted(TALLY_CAPS)));
+        register(&dir, "bita", &bita, &[]);
+        register(&dir, "inkwell", &inkwell, &[]);
+        register(&dir, "tally", &tally, &[]);
+        let registry = Registry::new(dir.clone());
+        let status = registry.status().await;
+        assert_eq!(status.inkwell_migrated, Some(true));
+        let on = status.modules;
+        assert!(on.timers && on.hoy && on.jira);
+        assert!(on.notes && on.entry_notes && on.backlog && on.history && on.confluence_sync);
+        assert!(!on.atlassian && !on.meetings);
+        assert_eq!(status.tool(Tool::Tally).expect("tally").capabilities, TALLY_CAPS);
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1333,23 +1346,6 @@ esac"#
         let status = registry.status().await;
         assert!(status.modules.meetings && status.modules.live_assistant && status.modules.meeting_kinds);
         assert_eq!(status.tool(Tool::Recap).expect("recap").capabilities, vec!["meeting.record"]);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[cfg(unix)]
-    #[tokio::test(flavor = "current_thread")]
-    async fn a_migrated_inkwell_takes_over_the_docs() {
-        let dir = scratch("inkwell");
-        let bita = fake_tool(&dir, "bita", &capabilities_script("bita", ""));
-        let caps = INKWELL_CAPS.iter().map(|cap| format!("\"{cap}\"")).collect::<Vec<_>>().join(",");
-        let inkwell = fake_tool(&dir, "inkwell", &capabilities_script("inkwell", &caps));
-        register(&dir, "bita", &bita, &[]);
-        register(&dir, "inkwell", &inkwell, &[]);
-        let registry = Registry::new(dir.clone());
-        let status = registry.status().await;
-        assert_eq!(status.inkwell_migrated, Some(true));
-        assert_eq!(status.docs, Some(DocsProvider::Inkwell));
-        assert!(status.modules.backlog && status.modules.history);
         let _ = fs::remove_dir_all(&dir);
     }
 

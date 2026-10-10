@@ -108,6 +108,19 @@ fn database_check(database: &Path) -> Check {
     }
 }
 
+fn docs_check(status: &ToolsStatus, root: &Path) -> Check {
+    let pending = status.inkwell_migrated == Some(false);
+    Check {
+        id: "docs".into(),
+        health: if pending { Health::Warn } else { Health::Ok },
+        title: "Las páginas y las notas de cada cronómetro se leen con inkwell".into(),
+        detail: root.display().to_string(),
+        note: pending.then(|| {
+            "inkwell todavía no trae los docs ni las notas de bita: inkwell migrate --from-bita && inkwell migrate notes --from-bita".into()
+        }),
+    }
+}
+
 pub fn build(status: ToolsStatus, database: &Path) -> Report {
     let mut checks = vec![Check {
         id: "registry".into(),
@@ -126,20 +139,8 @@ pub fn build(status: ToolsStatus, database: &Path) -> Report {
             note: None,
         });
     }
-    if let Some(provider) = status.docs {
-        checks.push(Check {
-            id: "docs".into(),
-            health: Health::Ok,
-            title: format!("Las páginas se leen con {}", provider.tool().name()),
-            detail: match provider {
-                registry::DocsProvider::Inkwell => registry::inkwell_docs_root().display().to_string(),
-                registry::DocsProvider::Bita => cli::bita_docs_root().display().to_string(),
-            },
-            note: (provider == registry::DocsProvider::Bita
-                && status.tool(Tool::Inkwell).is_some_and(|found| found.ready())
-                && status.inkwell_migrated == Some(false))
-            .then(|| "inkwell está instalado pero no ha migrado los docs: inkwell migrate --from-bita".into()),
-        });
+    if status.tool(Tool::Inkwell).is_some_and(|found| found.ready()) {
+        checks.push(docs_check(&status, &registry::inkwell_docs_root()));
     }
     if status.tool(Tool::Bita).is_some_and(|found| found.ready()) {
         checks.push(database_check(database));
@@ -197,7 +198,6 @@ mod tests {
                 .collect(),
             invalid: vec![registry::Invalid { file: "odd".into(), problems: vec!["name must be lowercase letters, digits and dashes".into()] }],
             modules: Modules::default(),
-            docs: None,
             inkwell_migrated: None,
         }
     }
@@ -207,9 +207,11 @@ mod tests {
         let report = build(status_with(&[Tool::Bita]), Path::new("/nope/bita.db"));
         assert!(!report.blocked);
         let names: Vec<&str> = report.install.iter().map(|card| card.tool.as_str()).collect();
-        assert_eq!(names, vec!["inkwell", "atl", "recap"]);
-        assert_eq!(report.install[2].command, "npm i -g @kikedealba/recap && recap setup");
+        assert_eq!(names, vec!["inkwell", "tally", "atl", "recap"]);
+        assert_eq!(report.install[1].command, "npm install -g @kikedealba/tally && tally setup");
+        assert!(report.install[1].purpose.contains("Jira"));
         assert!(report.checks.iter().any(|check| check.id == "database"));
+        assert!(!report.checks.iter().any(|check| check.id == "docs"));
         assert!(report.checks.iter().any(|check| check.id == "invalid:odd"));
     }
 
@@ -217,7 +219,24 @@ mod tests {
     fn nothing_installed_blocks_the_app() {
         let report = build(status_with(&[]), Path::new("/nope/bita.db"));
         assert!(report.blocked);
-        assert_eq!(report.install.len(), 4);
+        assert_eq!(report.install.len(), 5);
         assert!(!report.checks.iter().any(|check| check.id == "database"));
+    }
+
+    #[test]
+    fn inkwell_reads_the_docs_and_says_when_it_still_has_to_migrate() {
+        let mut status = status_with(&[Tool::Bita, Tool::Inkwell, Tool::Tally]);
+        let report = build(status.clone(), Path::new("/nope/bita.db"));
+        let docs = report.checks.iter().find(|check| check.id == "docs").expect("docs");
+        assert_eq!(docs.health, Health::Ok);
+        assert!(docs.note.is_none());
+        let names: Vec<&str> = report.install.iter().map(|card| card.tool.as_str()).collect();
+        assert_eq!(names, vec!["atl", "recap"]);
+
+        status.inkwell_migrated = Some(false);
+        let report = build(status, Path::new("/nope/bita.db"));
+        let docs = report.checks.iter().find(|check| check.id == "docs").expect("docs");
+        assert_eq!(docs.health, Health::Warn);
+        assert!(docs.note.as_deref().is_some_and(|note| note.contains("migrate notes")));
     }
 }

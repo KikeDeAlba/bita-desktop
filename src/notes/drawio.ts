@@ -77,7 +77,7 @@ export function drawioFigure(body: string, context: DrawioContext): HTMLElement 
     try {
       const url = await pageAsset(imageRel)
       if (url === null) {
-        stage.replaceChildren(element('p', 'md-mermaid-note', `Sin render: bita docs diagrams render ${context.pageId}`))
+        stage.replaceChildren(element('p', 'md-mermaid-note', `Sin render: inkwell diagrams render ${context.pageId}`))
         return
       }
       const image = await loadImage(url)

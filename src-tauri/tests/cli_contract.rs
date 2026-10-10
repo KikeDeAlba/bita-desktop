@@ -24,44 +24,47 @@ fn registered_bin(tool: &str) -> Option<Vec<String>> {
 }
 
 struct Sandbox {
-    tool: String,
-    bin: Vec<String>,
+    bins: Vec<(String, Vec<String>)>,
     root: PathBuf,
 }
 
 impl Sandbox {
-    fn new(tool: &str, name: &str) -> Option<Self> {
-        let Some(bin) = registered_bin(tool) else {
-            eprintln!("skipped: {tool} is not in the sandbox registry ({REGISTRY_ENV})");
-            return None;
-        };
-        let root = env::temp_dir().join(format!("den-contract-{tool}-{name}-{}", std::process::id()));
+    fn new(tools: &[&str], name: &str) -> Option<Self> {
+        let mut bins = Vec::new();
+        for tool in tools {
+            let Some(bin) = registered_bin(tool) else {
+                eprintln!("skipped: {tool} is not in the sandbox registry ({REGISTRY_ENV})");
+                return None;
+            };
+            bins.push((tool.to_string(), bin));
+        }
+        let root = env::temp_dir().join(format!("den-contract-{}-{name}-{}", tools.join("-"), std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("home")).expect("sandbox home");
-        Some(Self { tool: tool.to_string(), bin, root })
+        Some(Self { bins, root })
+    }
+
+    fn bin(&self, tool: &str) -> &[String] {
+        &self.bins.iter().find(|(name, _)| name == tool).expect("tool in the sandbox").1
     }
 
     fn path(&self) -> OsString {
         let mut parts: Vec<PathBuf> = Vec::new();
-        if let Some(parent) = Path::new(&self.bin[0]).parent() {
-            parts.push(parent.to_path_buf());
+        for (_, bin) in &self.bins {
+            if let Some(parent) = Path::new(&bin[0]).parent() {
+                parts.push(parent.to_path_buf());
+            }
         }
         parts.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
         env::join_paths(parts).unwrap_or_default()
     }
 
-    fn run(&self, args: &[&str], stdin: Option<&str>) -> serde_json::Value {
-        use std::io::Write;
-        let mut command = Command::new(&self.bin[0]);
-        command.args(&self.bin[1..]).args(args).arg("--json");
-        if self.tool == "bita" {
-            command
-                .arg("--db-path")
-                .arg(self.root.join("bita.db"))
-                .arg("--docs-dir")
-                .arg(self.root.join("docs"));
-        }
-        let mut child = command
+    fn run(&self, tool: &str, args: &[&str]) -> serde_json::Value {
+        let bin = self.bin(tool);
+        let output = Command::new(&bin[0])
+            .args(&bin[1..])
+            .args(args)
+            .arg("--json")
             .current_dir(&self.root)
             .env_clear()
             .env("PATH", self.path())
@@ -69,6 +72,8 @@ impl Sandbox {
             .env("XDG_CONFIG_HOME", self.root.join("home/.config"))
             .env("XDG_DATA_HOME", self.root.join("home/.local/share"))
             .env("XDG_STATE_HOME", self.root.join("home/.local/state"))
+            .env("APPDATA", self.root.join("home/AppData/Roaming"))
+            .env("LOCALAPPDATA", self.root.join("home/AppData/Local"))
             .env(REGISTRY_ENV, registry().expect("registry"))
             .env("KIT_CREDENTIALS", "file")
             .env("KIT_NO_EVENTS", "1")
@@ -79,31 +84,37 @@ impl Sandbox {
             .env("GIT_AUTHOR_EMAIL", "contract@den.invalid")
             .env("GIT_COMMITTER_NAME", "den contract")
             .env("GIT_COMMITTER_EMAIL", "contract@den.invalid")
-            .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .spawn()
+            .output()
             .expect("run the registered tool");
-        if let Some(text) = stdin {
-            let mut pipe = child.stdin.take().expect("stdin");
-            pipe.write_all(text.as_bytes()).expect("write stdin");
-        }
-        let output = child.wait_with_output().expect("wait for the tool");
         let stdout = String::from_utf8_lossy(&output.stdout);
         let line = stdout.trim().lines().last().unwrap_or_default().to_string();
         serde_json::from_str(&line).unwrap_or_else(|_| {
             panic!(
-                "{} {args:?} did not print one JSON document: {stdout} {}",
-                self.tool,
+                "{tool} {args:?} did not print one JSON document: {stdout} {}",
                 String::from_utf8_lossy(&output.stderr)
             )
         })
+    }
+
+    fn declares(&self, tool: &str, capability: &str) -> bool {
+        self.run(tool, &["capabilities"])["data"]["capabilities"]
+            .as_array()
+            .is_some_and(|list| list.iter().any(|value| value.as_str() == Some(capability)))
     }
 }
 
 impl Drop for Sandbox {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
+    }
+}
+
+fn has_fields(value: &serde_json::Value, fields: &[&str], what: &str) {
+    for field in fields {
+        assert!(value.get(*field).is_some(), "{what} lost {field}: {value}");
     }
 }
 
@@ -116,8 +127,8 @@ fn every_registered_tool_answers_its_capabilities() {
     for entry in fs::read_dir(&dir).expect("registry").flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(tool) = name.strip_suffix(".json") else { continue };
-        let Some(sandbox) = Sandbox::new(tool, "capabilities") else { continue };
-        let envelope = sandbox.run(&["capabilities"], None);
+        let Some(sandbox) = Sandbox::new(&[tool], "capabilities") else { continue };
+        let envelope = sandbox.run(tool, &["capabilities"]);
         assert_eq!(envelope["ok"].as_bool(), Some(true), "{tool}: {envelope}");
         assert_eq!(envelope["data"]["name"].as_str(), Some(tool), "{envelope}");
         assert!(envelope["data"]["capabilities"].is_array(), "{envelope}");
@@ -126,8 +137,8 @@ fn every_registered_tool_answers_its_capabilities() {
 
 #[test]
 fn bita_still_speaks_the_schema_this_app_understands() {
-    let Some(sandbox) = Sandbox::new("bita", "schema") else { return };
-    let envelope = sandbox.run(&["ls"], None);
+    let Some(sandbox) = Sandbox::new(&["bita"], "schema") else { return };
+    let envelope = sandbox.run("bita", &["ls"]);
     assert_eq!(
         envelope["schemaVersion"].as_u64(),
         Some(EXPECTED_SCHEMA),
@@ -138,145 +149,169 @@ fn bita_still_speaks_the_schema_this_app_understands() {
 }
 
 #[test]
-fn bita_still_resolves_the_seven_sections() {
-    let Some(sandbox) = Sandbox::new("bita", "sections") else { return };
-    let envelope = sandbox.run(&["docs", "tree"], None);
-    assert_eq!(envelope["ok"].as_bool(), Some(true), "bita docs tree failed: {envelope}");
-    let sections: Vec<String> = envelope["meta"]["sections"]
-        .as_array()
-        .expect("meta.sections is the canonical list")
-        .iter()
-        .map(|value| value.as_str().unwrap_or_default().to_string())
-        .collect();
-    assert_eq!(
-        sections,
-        vec!["Contexto", "Qué se hizo", "Decisiones", "Hallazgos", "Verificación", "Pendiente", "Tocado"],
-        "bita changed the canonical sections; the reader paints them by this order"
-    );
-}
-
-#[test]
-fn bita_lists_the_backlog_the_app_paints() {
-    let Some(sandbox) = Sandbox::new("bita", "backlog") else { return };
-    let run = |args: &[&str]| sandbox.run(args, None);
-
-    let project = run(&["project", "add", "Contrato"]);
-    assert_eq!(project["ok"].as_bool(), Some(true), "{project}");
-
-    let added = run(&["backlog", "add", "--kind", "pending", "--title", "Rotar el secreto", "--project", "Contrato"]);
-    assert_eq!(added["ok"].as_bool(), Some(true), "{added}");
-    let id = added["data"]["id"].as_i64().expect("the new item has an id").to_string();
-    assert_eq!(added["data"]["key"].as_str(), Some("CON-1"), "{added}");
-
-    let resolved = run(&["backlog", "resolve", "CON-1", "--resolution", "Rotado"]);
-    assert_eq!(resolved["data"]["status"].as_str(), Some("resolved"));
-    let reopened = run(&["backlog", "reopen", &id]);
-    assert_eq!(reopened["data"]["status"].as_str(), Some("open"));
-    let edited = run(&["backlog", "edit", &id, "--kind", "finding"]);
-    assert_eq!(edited["data"]["kind"].as_str(), Some("finding"));
-
-    let listed = run(&["backlog", "ls", "--status", "all"]);
-    let item = &listed["data"][0];
-    for field in [
-        "id", "key", "projectKey", "kind", "status", "title", "body", "projectName", "pageId", "pageTitle",
-        "updatedAt", "resolution", "source", "createdAt",
-    ] {
-        assert!(item.get(field).is_some(), "backlog items lost {field}: {item}");
-    }
-}
-
-#[test]
-fn bita_reports_projects_outside_jira_apart() {
-    let Some(sandbox) = Sandbox::new("bita", "jira") else { return };
-    let run = |args: &[&str]| sandbox.run(args, None);
-
-    assert_eq!(run(&["project", "add", "Con Jira"])["ok"].as_bool(), Some(true));
-    let outside = run(&["project", "add", "Sin Jira", "--no-jira"]);
-    assert_eq!(outside["data"]["jira"].as_bool(), Some(false), "{outside}");
-
-    for (title, project) in [("Algo para Jira", "Con Jira"), ("Algo fuera", "Sin Jira")] {
-        let logged = run(&["log", title, "--project", project, "--from", "00:10", "--for", "30m"]);
+fn bita_lists_the_entries_the_hoy_tab_groups() {
+    let Some(sandbox) = Sandbox::new(&["bita"], "entries") else { return };
+    assert_eq!(sandbox.run("bita", &["project", "add", "Contrato"])["ok"].as_bool(), Some(true));
+    for title in ["Rotar el secreto", "Rotar el secreto"] {
+        let logged = sandbox.run("bita", &["log", title, "--project", "Contrato", "--from", "00:10", "--for", "30m"]);
         assert_eq!(logged["ok"].as_bool(), Some(true), "{logged}");
     }
+    for range in ["today", "week"] {
+        let listed = sandbox.run("bita", &["entries", range]);
+        assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+        assert_eq!(listed["ok"].as_bool(), Some(true), "{listed}");
+        let entries = listed["data"].as_array().expect("entries");
+        assert!(!entries.is_empty(), "{listed}");
+        for entry in entries {
+            has_fields(
+                entry,
+                &[
+                    "id", "description", "projectId", "projectName", "start", "stop", "startLocal", "localDay",
+                    "durationSeconds", "durationHuman", "registered", "running",
+                ],
+                "entries",
+            );
+        }
+    }
+}
 
-    let pending = run(&["summary", "--pending"]);
-    assert_eq!(pending["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
-    let groups = pending["data"]["groups"].as_array().expect("groups");
-    assert!(groups.iter().all(|group| group["jira"].as_bool() == Some(true)), "{pending}");
-    assert_eq!(pending["meta"]["nonJira"]["totalSeconds"].as_i64(), Some(1800), "{pending}");
+#[test]
+fn bita_lists_project_repos() {
+    let Some(sandbox) = Sandbox::new(&["bita"], "repos") else { return };
+    assert_eq!(sandbox.run("bita", &["project", "add", "Contrato"])["ok"].as_bool(), Some(true));
+    let listed = sandbox.run("bita", &["project", "repo", "ls", "--project", "Contrato"]);
+    assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+    assert_eq!(listed["ok"].as_bool(), Some(true), "{listed}");
+    for repo in listed["data"]["repos"].as_array().expect("repos") {
+        has_fields(repo, &["project", "path", "slug", "source", "addedAt", "lastSeenAt", "exists"], "repos");
+    }
 }
 
 #[test]
 fn inkwell_answers_the_docs_contract() {
-    let Some(sandbox) = Sandbox::new("inkwell", "contract") else { return };
-    let capabilities = sandbox.run(&["capabilities"], None);
-    let declared: Vec<&str> = capabilities["data"]["capabilities"]
-        .as_array()
-        .expect("capabilities")
-        .iter()
-        .filter_map(|value| value.as_str())
-        .collect();
-    assert!(declared.contains(&"docs.page.read"), "{capabilities}");
+    let Some(sandbox) = Sandbox::new(&["inkwell"], "contract") else { return };
+    assert!(sandbox.declares("inkwell", "docs.page.read"));
 
-    let migrated = sandbox.run(&["migrate", "status"], None);
+    let migrated = sandbox.run("inkwell", &["migrate", "status"]);
     assert_eq!(migrated["ok"].as_bool(), Some(true), "{migrated}");
     assert!(migrated["data"]["migrated"].is_boolean(), "{migrated}");
 
-    let tree = sandbox.run(&["tree", "--pages"], None);
+    let tree = sandbox.run("inkwell", &["tree", "--pages", "--months"]);
     assert_eq!(tree["ok"].as_bool(), Some(true), "{tree}");
     assert!(tree["data"]["spaces"].is_array(), "{tree}");
 }
 
 #[test]
-fn bita_searches_by_page() {
-    let Some(sandbox) = Sandbox::new("bita", "pages") else { return };
-    assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
-    let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
-    assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
-    let page_id = page["data"]["page"]["pageId"]
-        .as_i64()
-        .or_else(|| page["data"]["pageId"].as_i64())
-        .expect("the new page has an id");
-    let markdown = sandbox.root.join("body.md");
-    fs::write(&markdown, "## Contexto\n\nLa paridad del kernel compartido exige la misma rama.\n").expect("body");
-    let wrote = sandbox.run(
-        &["docs", "page", "write", &page_id.to_string(), "--md", &markdown.display().to_string()],
-        None,
-    );
-    assert_eq!(wrote["ok"].as_bool(), Some(true), "{wrote}");
-
-    let found = sandbox.run(&["docs", "search", "paridad", "--pages", "--project", "Contrato"], None);
-    assert_eq!(found["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
-    assert_eq!(found["ok"].as_bool(), Some(true), "{found}");
-    let hit = &found["data"][0];
-    for field in [
-        "pageId", "title", "projectId", "projectName", "projectSlug", "relPath", "ancestors", "matchCount",
-        "sources", "matches",
-    ] {
-        assert!(hit.get(field).is_some(), "page hits lost {field}: {hit}");
+fn inkwell_lists_the_notes_of_each_entry() {
+    let Some(sandbox) = Sandbox::new(&["inkwell"], "entry-notes") else { return };
+    if !sandbox.declares("inkwell", "docs.entry-notes") {
+        eprintln!("skipped: this inkwell does not declare docs.entry-notes");
+        return;
     }
-    assert!(hit["sources"].get("page").is_some() && hit["sources"].get("entries").is_some(), "{hit}");
-    let first = &hit["matches"][0];
-    for field in ["source", "section", "line", "prefix", "match", "suffix"] {
-        assert!(first.get(field).is_some(), "page matches lost {field}: {first}");
+    for args in [
+        &["note", "ls", "today", "--limit", "0"][..],
+        &["note", "ls", "--limit", "5", "--offset", "0"][..],
+        &["note", "search", "secreto"][..],
+    ] {
+        let listed = sandbox.run("inkwell", args);
+        assert_eq!(listed["ok"].as_bool(), Some(true), "{args:?}: {listed}");
+        assert!(listed["data"].is_array(), "{args:?}: {listed}");
     }
 }
 
-#[test]
-fn bita_keeps_atlassian_settings_per_space() {
-    let Some(sandbox) = Sandbox::new("bita", "atlassian") else { return };
-    assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
-    let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
+fn new_page(sandbox: &Sandbox, title: &str) -> String {
+    let space = sandbox.run("inkwell", &["space", "add", "Contrato"]);
+    assert_eq!(space["ok"].as_bool(), Some(true), "{space}");
+    let page = sandbox.run("inkwell", &["page", "new", title, "--project", "Contrato"]);
     assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
+    page["data"]["page"]["pageId"]
+        .as_i64()
+        .or_else(|| page["data"]["pageId"].as_i64())
+        .expect("the new page has an id")
+        .to_string()
+}
+
+fn write_page(sandbox: &Sandbox, page_id: &str, body: &str) {
+    let markdown = sandbox.root.join("body.md");
+    fs::write(&markdown, body).expect("body");
+    let wrote = sandbox.run("inkwell", &["page", "write", page_id, "--md", &markdown.display().to_string()]);
+    assert_eq!(wrote["ok"].as_bool(), Some(true), "{wrote}");
+}
+
+#[test]
+fn inkwell_lists_the_backlog_the_app_paints() {
+    let Some(sandbox) = Sandbox::new(&["inkwell"], "backlog") else { return };
+    let space = sandbox.run("inkwell", &["space", "add", "Contrato"]);
+    assert_eq!(space["ok"].as_bool(), Some(true), "{space}");
+
+    let added = sandbox.run(
+        "inkwell",
+        &["backlog", "add", "--kind", "pending", "--title", "Rotar el secreto", "--project", "Contrato"],
+    );
+    assert_eq!(added["ok"].as_bool(), Some(true), "{added}");
+    let id = added["data"]["id"].as_i64().expect("the new item has an id").to_string();
+
+    let resolved = sandbox.run("inkwell", &["backlog", "resolve", &id, "--resolution", "Rotado"]);
+    assert_eq!(resolved["data"]["status"].as_str(), Some("resolved"), "{resolved}");
+    let reopened = sandbox.run("inkwell", &["backlog", "reopen", &id]);
+    assert_eq!(reopened["data"]["status"].as_str(), Some("open"), "{reopened}");
+    let edited = sandbox.run("inkwell", &["backlog", "edit", &id, "--kind", "finding"]);
+    assert_eq!(edited["data"]["kind"].as_str(), Some("finding"), "{edited}");
+
+    let listed = sandbox.run("inkwell", &["backlog", "ls", "--status", "all"]);
+    has_fields(
+        &listed["data"][0],
+        &["id", "key", "kind", "status", "title", "body", "projectName", "pageId", "pageTitle", "updatedAt", "resolution", "createdAt"],
+        "backlog items",
+    );
+}
+
+#[test]
+fn inkwell_searches_by_page() {
+    let Some(sandbox) = Sandbox::new(&["inkwell"], "pages") else { return };
+    let page_id = new_page(&sandbox, "Kernel compartido");
+    write_page(&sandbox, &page_id, "## Contexto\n\nLa paridad del kernel compartido exige la misma rama.\n");
+
+    let found = sandbox.run("inkwell", &["search", "paridad", "--pages", "--project", "Contrato"]);
+    assert_eq!(found["ok"].as_bool(), Some(true), "{found}");
+    let hit = &found["data"][0];
+    has_fields(hit, &["pageId", "title", "projectName", "relPath", "matchCount", "matches"], "page hits");
+    has_fields(&hit["matches"][0], &["section", "line", "prefix", "match", "suffix"], "page matches");
+}
+
+#[test]
+fn inkwell_keeps_the_history_of_a_page() {
+    let Some(sandbox) = Sandbox::new(&["inkwell"], "history") else { return };
+    let page_id = new_page(&sandbox, "Kernel compartido");
+    for body in ["## Contexto\n\nPrimera versión.\n", "## Contexto\n\nSegunda versión.\n"] {
+        write_page(&sandbox, &page_id, body);
+    }
+
+    let history = sandbox.run("inkwell", &["page", "history", &page_id]);
+    assert_eq!(history["ok"].as_bool(), Some(true), "{history}");
+    let revisions = history["data"]["revisions"].as_array().expect("revisions");
+    assert!(revisions.len() >= 2, "{history}");
+    for revision in revisions {
+        has_fields(revision, &["sha", "date", "subject"], "revisions");
+    }
+
+    let oldest = revisions.last().and_then(|revision| revision["sha"].as_str()).expect("sha");
+    let diff = sandbox.run("inkwell", &["page", "diff", &page_id, oldest]);
+    assert_eq!(diff["ok"].as_bool(), Some(true), "{diff}");
+    has_fields(&diff["data"], &["pageId", "from", "to", "diff", "hunks"], "page diff");
+}
+
+#[test]
+fn inkwell_keeps_atlassian_settings_per_space() {
+    let Some(sandbox) = Sandbox::new(&["inkwell"], "atlassian") else { return };
+    new_page(&sandbox, "Kernel compartido");
     let set = sandbox.run(
-        &[
-            "project", "atlassian", "Contrato", "--via", "cli", "--confluence", "STI", "--pull", "on", "--push", "off",
-        ],
-        None,
+        "inkwell",
+        &["space", "set", "Contrato", "--confluence", "STI", "--pull", "on", "--push", "off"],
     );
     assert_eq!(set["ok"].as_bool(), Some(true), "{set}");
 
-    let tree = sandbox.run(&["docs", "tree", "--pages", "--months"], None);
+    let tree = sandbox.run("inkwell", &["tree", "--pages", "--months"]);
     let space = tree["data"]["spaces"]
         .as_array()
         .expect("spaces")
@@ -285,82 +320,41 @@ fn bita_keeps_atlassian_settings_per_space() {
         .cloned()
         .expect("the space is listed");
     let atlassian = &space["atlassian"];
-    assert_eq!(atlassian["via"].as_str(), Some("cli"), "{space}");
     assert_eq!(atlassian["sync"]["pull"].as_bool(), Some(true), "{space}");
     assert_eq!(atlassian["sync"]["push"].as_bool(), Some(false), "{space}");
-    assert!(atlassian["sync"].get("lastSyncAt").is_some(), "{space}");
-    assert_eq!(atlassian["confluence"]["kind"].as_str(), Some("space"), "{space}");
-    assert_eq!(atlassian["confluence"]["spaceKey"].as_str(), Some("STI"), "{space}");
 
-    let status = sandbox.run(&["confluence", "sync", "status", "Contrato"], None);
+    let status = sandbox.run("inkwell", &["confluence", "status", "Contrato"]);
     assert_eq!(status["ok"].as_bool(), Some(true), "{status}");
     assert!(status["data"].is_array(), "{status}");
 }
 
 #[test]
-fn bita_lists_atlassian_sites() {
-    let Some(sandbox) = Sandbox::new("bita", "sites") else { return };
-    let listed = sandbox.run(&["atlassian", "site", "ls"], None);
-    assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+fn atl_lists_the_sites_the_window_draws() {
+    let Some(sandbox) = Sandbox::new(&["atl"], "sites") else { return };
+    let listed = sandbox.run("atl", &["site", "ls"]);
     assert_eq!(listed["ok"].as_bool(), Some(true), "{listed}");
     assert!(listed["data"].is_array(), "{listed}");
-    for site in listed["data"].as_array().expect("sites") {
-        for field in ["site", "email", "tokenStored", "jira", "confluence", "projects", "status"] {
-            assert!(site.get(field).is_some(), "sites lost {field}: {site}");
-        }
-    }
 }
 
 #[test]
-fn bita_lists_project_repos() {
-    let Some(sandbox) = Sandbox::new("bita", "repos") else { return };
-    assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
-    let listed = sandbox.run(&["project", "repo", "ls", "--project", "Contrato"], None);
-    assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
-    assert_eq!(listed["ok"].as_bool(), Some(true), "{listed}");
-    let repos = listed["data"]["repos"].as_array().expect("repos");
-    for repo in repos {
-        for field in ["project", "path", "slug", "source", "addedAt", "lastSeenAt", "exists"] {
-            assert!(repo.get(field).is_some(), "repos lost {field}: {repo}");
-        }
-    }
-}
+fn tally_reports_the_pending_time_in_the_summary_shape() {
+    let Some(sandbox) = Sandbox::new(&["bita", "tally"], "pending") else { return };
+    assert_eq!(sandbox.run("bita", &["project", "add", "Contrato"])["ok"].as_bool(), Some(true));
+    let logged = sandbox.run("bita", &["log", "Algo para Jira", "--project", "Contrato", "--from", "00:10", "--for", "30m"]);
+    assert_eq!(logged["ok"].as_bool(), Some(true), "{logged}");
 
-#[test]
-fn bita_keeps_the_history_of_a_page() {
-    let Some(sandbox) = Sandbox::new("bita", "history") else { return };
-    assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
-    let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
-    assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
-    let page_id = page["data"]["page"]["pageId"]
-        .as_i64()
-        .or_else(|| page["data"]["pageId"].as_i64())
-        .expect("the new page has an id");
-    for body in ["## Contexto\n\nPrimera versión.\n", "## Contexto\n\nSegunda versión.\n"] {
-        let markdown = sandbox.root.join("body.md");
-        fs::write(&markdown, body).expect("body");
-        let wrote = sandbox.run(
-            &["docs", "page", "write", &page_id.to_string(), "--md", &markdown.display().to_string()],
-            None,
+    let pending = sandbox.run("tally", &["summary", "--pending"]);
+    assert_eq!(pending["ok"].as_bool(), Some(true), "{pending}");
+    has_fields(&pending["data"], &["totalSeconds", "totalHuman", "groups"], "tally summary");
+    let groups = pending["data"]["groups"].as_array().expect("groups");
+    for group in groups {
+        has_fields(
+            group,
+            &[
+                "summary", "projectId", "projectName", "totalSeconds", "totalHuman", "estimateSeconds", "estimateHuman",
+                "entryIds", "days", "partIndex", "partCount",
+            ],
+            "tally groups",
         );
-        assert_eq!(wrote["ok"].as_bool(), Some(true), "{wrote}");
-    }
-
-    let history = sandbox.run(&["docs", "page", "history", &page_id.to_string()], None);
-    assert_eq!(history["ok"].as_bool(), Some(true), "{history}");
-    assert_eq!(history["data"]["pageId"].as_i64(), Some(page_id), "{history}");
-    let revisions = history["data"]["revisions"].as_array().expect("revisions");
-    assert!(revisions.len() >= 2, "{history}");
-    for revision in revisions {
-        for field in ["sha", "date", "subject", "source", "reason", "entryId"] {
-            assert!(revision.get(field).is_some(), "revisions lost {field}: {revision}");
-        }
-    }
-
-    let oldest = revisions.last().and_then(|revision| revision["sha"].as_str()).expect("sha");
-    let diff = sandbox.run(&["docs", "page", "diff", &page_id.to_string(), oldest], None);
-    assert_eq!(diff["ok"].as_bool(), Some(true), "{diff}");
-    for field in ["pageId", "from", "to", "diff", "hunks"] {
-        assert!(diff["data"].get(field).is_some(), "page diff lost {field}: {diff}");
     }
 }

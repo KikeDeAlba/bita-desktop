@@ -220,7 +220,7 @@ function header(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
   meta.append(element('span', 'doc-when', `Al día a ${spanish(page.recordedAt.slice(0, 10))}`))
   meta.append(element('span', 'doc-repo', page.projectSlug))
   if (page.doc.file.status === 'changed') {
-    meta.append(element('span', 'pill pill--warn', 'editada fuera de bita'))
+    meta.append(element('span', 'pill pill--warn', 'editada fuera de inkwell'))
   }
   if (page.doc.file.status === 'missing') {
     meta.append(element('span', 'pill pill--warn', 'el archivo no está'))
