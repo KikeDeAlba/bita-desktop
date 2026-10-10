@@ -38,13 +38,27 @@ pub struct Project {
 #[serde(rename_all = "camelCase")]
 pub struct JiraProject {
     pub project_id: i64,
-    pub jira_project_key: String,
+    #[serde(default)]
+    pub jira_project_key: Option<String>,
+    #[serde(default = "jira_by_default")]
+    pub jira: bool,
+}
+
+fn jira_by_default() -> bool {
+    true
 }
 
 pub fn jira_projects_of(rows: Vec<serde_json::Value>) -> Vec<JiraProject> {
     rows.into_iter()
         .filter_map(|row| serde_json::from_value::<JiraProject>(row).ok())
-        .filter(|row| !row.jira_project_key.trim().is_empty())
+        .map(|mut row| {
+            row.jira_project_key = row
+                .jira_project_key
+                .map(|key| key.trim().to_string())
+                .filter(|key| !key.is_empty());
+            row
+        })
+        .filter(|row| row.jira_project_key.is_some() || !row.jira)
         .collect()
 }
 
@@ -300,7 +314,27 @@ mod tests {
         ];
         assert_eq!(
             jira_projects_of(rows),
-            vec![JiraProject { project_id: 1, jira_project_key: "CON".into() }]
+            vec![JiraProject { project_id: 1, jira_project_key: Some("CON".into()), jira: true }]
+        );
+    }
+
+    #[test]
+    fn the_jira_flag_comes_from_the_tally_map_and_defaults_to_on() {
+        let rows = vec![
+            json!({"projectId": 1, "projectName": "Contrato", "jiraProjectKey": "CON", "jira": true}),
+            json!({"projectId": 2, "projectName": "Mascotas", "jiraProjectKey": null, "jira": false}),
+            json!({"projectId": 3, "projectName": "Viejo", "jiraProjectKey": "OLD"}),
+            json!({"projectId": 4, "projectName": "Pausado", "jiraProjectKey": "PAU", "jira": false}),
+            json!({"projectId": 5, "projectName": "Sin mapa", "jira": true}),
+        ];
+        assert_eq!(
+            jira_projects_of(rows),
+            vec![
+                JiraProject { project_id: 1, jira_project_key: Some("CON".into()), jira: true },
+                JiraProject { project_id: 2, jira_project_key: None, jira: false },
+                JiraProject { project_id: 3, jira_project_key: Some("OLD".into()), jira: true },
+                JiraProject { project_id: 4, jira_project_key: Some("PAU".into()), jira: false },
+            ]
         );
     }
 
