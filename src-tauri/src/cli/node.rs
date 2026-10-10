@@ -61,6 +61,19 @@ fn identity_from(
     }
 }
 
+pub fn candidate_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for candidate in candidates() {
+        if let Some(parent) = candidate.parent() {
+            let parent = parent.to_path_buf();
+            if !dirs.contains(&parent) {
+                dirs.push(parent);
+            }
+        }
+    }
+    dirs
+}
+
 fn candidates() -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = Vec::new();
 
