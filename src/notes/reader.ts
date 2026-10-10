@@ -8,6 +8,7 @@ import './reader.css'
 import { assetsRelDirOf } from './drawio.ts'
 import { foldForSearch } from './markdown.ts'
 import { renderAnswers, renderProposals } from './proposals.ts'
+import { modKey } from '../platform.ts'
 import {
   meetingChip,
   renderMinutes,
@@ -54,6 +55,7 @@ export interface ReaderState {
   asideOpen: boolean
   meeting: MeetingContext | null
   video: VideoActions | null
+  history: boolean
 }
 
 export function renderReader(host: HTMLElement, state: ReaderState, handlers: ReaderHandlers): void {
@@ -141,7 +143,7 @@ function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
     nav.append(element('span', 'hit-count', `«${state.query.trim()}» ${state.hit + 1} de ${state.hitCount}`))
     nav.append(iconAction('up', 'Coincidencia anterior', () => handlers.onHit(-1)))
     nav.append(iconAction('down', 'Coincidencia siguiente', () => handlers.onHit(1)))
-    nav.append(element('span', 'kbd hit-key', '⌘G'))
+    nav.append(element('span', 'kbd hit-key', modKey('G')))
     row.append(nav)
   }
 
@@ -156,7 +158,7 @@ function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
       row.append(textAction('trash', 'Borrar video', handlers.onStripVideo))
     }
   }
-  if (page !== null && (state.meeting === null || state.meeting.tab === 'document')) {
+  if (page !== null && state.history && (state.meeting === null || state.meeting.tab === 'document')) {
     row.append(textAction('history', 'Historial', handlers.onHistory))
   }
   if (page !== null) row.append(textAction('download', 'Exportar PDF', handlers.onExport))

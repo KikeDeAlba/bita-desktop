@@ -1015,23 +1015,49 @@ input {
   color: var(--fg-mute);
 }
 
-.install-log {
-  margin: 0 0 8px 0;
-  padding: 9px 10px;
-  max-height: 140px;
-  overflow: auto;
-  border-radius: var(--radius-control);
-  background: var(--inset);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  color: var(--fg-dim);
-  user-select: text;
+.install-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
-.install-log[hidden] {
-  display: none;
+.install-card {
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--inset);
+}
+
+.install-card-title {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.install-card-note {
+  margin: 3px 0 0 0;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--fg-dim);
+}
+
+.install-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.install-card-command {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  word-break: break-all;
+  color: var(--fg-mute);
+  user-select: text;
 }
 
 .leave {

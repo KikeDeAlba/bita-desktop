@@ -20,6 +20,9 @@ import {
   onNotesFocus,
   onNotesMeeting,
   onSyncFinished,
+  onToolsChanged,
+  toolsStatus,
+  type Modules,
   openDocument,
   openExternal,
   pageDocument,
@@ -115,6 +118,11 @@ let clients = new Map<number, string>()
 let jiraKeys = new Map<number, string>()
 let records: MeetingRecord[] | null = null
 let storageBytes: number | null = null
+let modules: Modules | null = null
+
+function can(module: keyof Modules): boolean {
+  return modules === null || modules[module]
+}
 
 let railPainted = ''
 let readerPainted = ''
@@ -194,6 +202,8 @@ function railState(): RailState {
     backlogOpen: backlog === null ? null : openCount(backlog, backlogScope()),
     meetingCount: meetingCount(space),
     storageBytes,
+    showBacklog: can('backlog'),
+    showMeetings: can('meetings'),
   }
 }
 
@@ -261,6 +271,7 @@ function readerState(): ReaderState {
     asideOpen,
     meeting: meetingContext(),
     video: videoActions(),
+    history: can('history'),
   }
 }
 
@@ -334,6 +345,7 @@ function spacesSignature(): string {
 
 function railSignature(): string {
   return [
+    JSON.stringify(modules),
     spacesSignature(),
     activeSpace ?? '',
     currentSpace()?.pages.length ?? 0,
@@ -353,6 +365,7 @@ function railSignature(): string {
 
 function readerSignature(): string {
   return [
+    JSON.stringify(modules),
     selected === null ? 'none' : `${selected.kind}:${selected.id}`,
     opened?.doc.relPath ?? 'none',
     opened?.doc.file.status ?? 'none',
@@ -543,6 +556,7 @@ function paintView(kind: 'meetings' | 'storage' | 'space-settings' | 'atlassian'
     railOpen,
     onExpandRail: () => setRail(true),
     onManageConnections: selectAtlassian,
+    available: { atlassian: can('atlassian'), meetings: can('meetings') },
     onSaved: () => {
       void loadTree()
     },
@@ -772,12 +786,18 @@ function selectSettings(): void {
 }
 
 function selectAtlassian(): void {
+  if (!can('atlassian')) return
   selected = { kind: 'atlassian', id: 0 }
   leavePage()
   paint()
 }
 
 async function loadRecords(): Promise<void> {
+  if (!can('meetings')) {
+    records = []
+    paint()
+    return
+  }
   try {
     records = await recapList()
   } catch {
@@ -833,6 +853,12 @@ function selectBacklog(): void {
 }
 
 async function loadBacklog(): Promise<void> {
+  if (!can('backlog')) {
+    backlog = []
+    backlogFailure = null
+    paint()
+    return
+  }
   try {
     const payload = await backlogList()
     backlog = payload.data
@@ -1295,6 +1321,15 @@ async function start(): Promise<void> {
     paint()
   })
 
+  onToolsChanged((status) => {
+    applyModules(status.modules)
+  })
+  try {
+    modules = (await toolsStatus()).modules
+  } catch {
+    modules = null
+  }
+
   paint()
   await loadTree()
   void loadBacklog()
@@ -1307,6 +1342,21 @@ async function start(): Promise<void> {
   if (focus !== null) focusOnPage(focus)
   const meetingFocus = await notesTakeMeeting()
   if (meetingFocus !== null) focusOnMeeting(meetingFocus)
+}
+
+function applyModules(next: Modules): void {
+  modules = next
+  const kind = selected?.kind
+  if ((kind === 'backlog' && !next.backlog) || (kind === 'meetings' && !next.meetings) || (kind === 'atlassian' && !next.atlassian)) {
+    selected = null
+    leavePage()
+  }
+  railPainted = ''
+  readerPainted = ''
+  void loadTree()
+  void loadBacklog()
+  if (selected?.kind === 'meetings') void loadRecords()
+  paint()
 }
 
 void start()

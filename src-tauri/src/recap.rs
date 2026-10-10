@@ -1,5 +1,5 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -9,11 +9,9 @@ use tokio::time::timeout;
 
 use crate::cli::node;
 use crate::model::{Problem, ProblemKind};
+use crate::registry::Tool;
 
-const RECAP_OVERRIDE_ENV: &str = "RECAP_CLI";
-const PASSTHROUGH_ENV: [&str; 5] = ["RECAP_ROOT", "RECAP_STATE_DIR", "RECAP_CONFIG_PATH", "RECAP_DATA_DIR", "XDG_STATE_HOME"];
 pub const NOT_FOUND: &str = "MEETING_NOT_FOUND";
-const BASE_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 #[derive(Debug, Deserialize)]
 struct Envelope {
@@ -66,35 +64,17 @@ fn refusal(code: &str, message: &str) -> String {
 }
 
 pub fn missing() -> Problem {
-    Problem::new(
-        ProblemKind::CliFailed,
-        "recap no está instalado en este equipo, así que no puedo mostrar la reunión.",
-    )
-    .with_hint(Some("bita setup".into()))
+    crate::registry::missing_problem(Tool::Recap)
 }
 
-pub fn recap_binary() -> Option<PathBuf> {
-    if let Some(explicit) = std::env::var_os(RECAP_OVERRIDE_ENV) {
-        let path = PathBuf::from(explicit);
-        if path.is_file() {
-            return Some(path);
-        }
-    }
-    let mut candidates = Vec::new();
-    if let Some(home) = node::home() {
-        candidates.push(home.join(".local/bin/recap"));
-        candidates.push(home.join("Applications/Recap.app/Contents/MacOS/recap"));
-    }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/recap"));
-    candidates.push(PathBuf::from("/usr/local/bin/recap"));
-    candidates.push(PathBuf::from("/Applications/Recap.app/Contents/MacOS/recap"));
-    candidates.into_iter().find(|candidate| candidate.is_file())
+pub fn recap_binary() -> Option<Vec<OsString>> {
+    crate::registry::global().resolve_now(Tool::Recap).map(|found| found.bin)
 }
 
 pub async fn recap_call(args: &[&str], limit: Duration) -> Result<Value, RecapError> {
     let recap = recap_binary().ok_or(RecapError::Missing)?;
 
-    let mut command = recap_command(&recap, BASE_PATH);
+    let mut command = recap_command(&recap, None).ok_or(RecapError::Missing)?;
     command.args(args).arg("--json");
 
     let output = timeout(limit, command.output())
@@ -112,38 +92,18 @@ pub async fn recap_call(args: &[&str], limit: Duration) -> Result<Value, RecapEr
     parse(&String::from_utf8_lossy(&output.stdout), &String::from_utf8_lossy(&output.stderr))
 }
 
-pub fn recap_command(recap: &std::path::Path, path: &str) -> Command {
-    let mut command = Command::new(recap);
-    command
-        .current_dir("/")
-        .env_clear()
-        .env("PATH", path)
-        .stdin(Stdio::null())
-        .kill_on_drop(true);
-    if let Some(home) = node::home() {
-        command.env("HOME", home);
-    }
-    for (key, value) in node::identity() {
-        command.env(key, value);
-    }
-    for key in PASSTHROUGH_ENV {
-        if let Some(value) = std::env::var_os(key) {
-            command.env(key, value);
-        }
-    }
-    command
+pub fn recap_command(recap: &[OsString], path: Option<OsString>) -> Option<Command> {
+    crate::registry::command(recap, path)
 }
 
-pub fn assistant_path() -> String {
-    let mut parts: Vec<String> = Vec::new();
+pub fn assistant_path(recap: &[OsString]) -> OsString {
+    let mut parts: Vec<PathBuf> = Vec::new();
     if let Some(home) = node::home() {
-        parts.push(home.join(".local/bin").display().to_string());
-        parts.push(home.join(".claude/local").display().to_string());
+        parts.push(home.join(".local").join("bin"));
+        parts.push(home.join(".claude").join("local"));
     }
-    parts.push("/opt/homebrew/bin".into());
-    parts.push("/usr/local/bin".into());
-    parts.push(BASE_PATH.into());
-    parts.join(":")
+    parts.extend(std::env::split_paths(&crate::registry::path_for(recap)));
+    crate::platform::search_path(parts)
 }
 
 pub(crate) fn parse(stdout: &str, stderr: &str) -> Result<Value, RecapError> {

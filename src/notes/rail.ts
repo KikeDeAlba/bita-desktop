@@ -6,6 +6,7 @@ import type { PageResult, SearchScope } from './search.ts'
 import { formatBytes } from './media-dialogs.ts'
 import { withPages } from './switcher.ts'
 import './spaces.css'
+import { modKey } from '../platform.ts'
 
 export type SelectionKind = 'page' | 'entry' | 'backlog' | 'meetings' | 'storage' | 'space-settings' | 'atlassian'
 
@@ -41,6 +42,8 @@ export interface RailState {
   backlogOpen: number | null
   meetingCount: number
   storageBytes: number | null
+  showBacklog: boolean
+  showMeetings: boolean
 }
 
 export function spaceKey(space: Space): string {
@@ -74,8 +77,8 @@ export function renderRail(host: HTMLElement, state: RailState, handlers: RailHa
     renderResults(parts.body, state, handlers)
     return
   }
-  parts.body.append(fixedRow('inbox', 'Pendientes y hallazgos', state.backlogOpen, state.selected?.kind === 'backlog', handlers.onSelectBacklog))
-  parts.body.append(fixedRow('calendar', 'Reuniones', state.meetingCount, state.selected?.kind === 'meetings', handlers.onSelectMeetings))
+  if (state.showBacklog) parts.body.append(fixedRow('inbox', 'Pendientes y hallazgos', state.backlogOpen, state.selected?.kind === 'backlog', handlers.onSelectBacklog))
+  if (state.showMeetings) parts.body.append(fixedRow('calendar', 'Reuniones', state.meetingCount, state.selected?.kind === 'meetings', handlers.onSelectMeetings))
   renderTree(parts.body, state, handlers)
 }
 
@@ -164,7 +167,7 @@ function switcherButton(state: RailState, handlers: RailHandlers): HTMLElement {
     lines.append(element('span', 'space-switch-meta', state.client === null ? pages : `${state.client} · ${pages}`))
   }
   button.append(dot, lines, icon('chevronDown', 12))
-  button.title = 'Cambiar de espacio (⌘K)'
+  button.title = `Cambiar de espacio (${modKey('K')})`
   button.addEventListener('click', () => handlers.onSwitcher(button))
   return button
 }
@@ -239,10 +242,12 @@ function collapsedStrip(state: RailState, handlers: RailHandlers): HTMLElement {
   unfold.addEventListener('click', handlers.onExpand)
   strip.append(unfold)
 
-  for (const [glyph, label, run] of [
-    ['inbox', 'Pendientes y hallazgos', handlers.onSelectBacklog],
-    ['calendar', 'Reuniones', handlers.onSelectMeetings],
-  ] as const) {
+  const shortcuts = [
+    ['inbox', 'Pendientes y hallazgos', handlers.onSelectBacklog, state.showBacklog],
+    ['calendar', 'Reuniones', handlers.onSelectMeetings, state.showMeetings],
+  ] as const
+  for (const [glyph, label, run, shown] of shortcuts) {
+    if (!shown) continue
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'strip-icon'

@@ -9,6 +9,8 @@ import {
   liveState,
   notesToday,
   onDocsChanged,
+  onToolsChanged,
+  toolsStatus,
   onLiveSettings,
   onLiveState,
   onLiveTranscript,
@@ -34,6 +36,8 @@ import {
   type Scope,
   type Snapshot,
   type SummaryView,
+  type ToolsStatus,
+  installHint,
 } from './bita.ts'
 import { element, iconButton, must } from './dom.ts'
 import { clock, human, startedAt } from './format.ts'
@@ -76,6 +80,47 @@ let inSettings = false
 let notesOfToday: NoteRow[] = []
 let live: LiveView | null = null
 let proposals: PendingMeeting[] = []
+let tools: ToolsStatus | null = null
+
+function enabled(module: keyof ToolsStatus['modules']): boolean {
+  return tools === null || tools.modules[module]
+}
+
+function visibleTabs(): Tab[] {
+  return TABS.filter((name) => name === 'ahora' || enabled('timers'))
+}
+
+function applyModules(): void {
+  for (const button of tabStrip.querySelectorAll<HTMLButtonElement>('[role="tab"]')) {
+    const name = button.dataset['tab'] ?? ''
+    button.hidden = !isTab(name) || !visibleTabs().includes(name)
+  }
+  tabStrip.hidden = inSettings || visibleTabs().length < 2
+  for (const button of launchKind.querySelectorAll<HTMLButtonElement>('[data-kind]')) {
+    button.hidden = button.dataset['kind'] !== '' && !enabled('meetingKinds')
+  }
+  launchKind.hidden = !enabled('meetingKinds')
+  if (!enabled('meetingKinds') && launchKindValue !== '') setLaunchKind('')
+  notesButton.hidden = !enabled('notes')
+  if (!visibleTabs().includes(tab)) {
+    tab = 'ahora'
+    for (const button of tabStrip.querySelectorAll<HTMLButtonElement>('[role="tab"]')) {
+      button.setAttribute('aria-selected', String(button.dataset['tab'] === 'ahora'))
+    }
+  }
+}
+
+function missingBita(): HTMLElement {
+  const box = element('div', 'empty')
+  box.append(element('p', 'empty-title', 'Para medir el tiempo hace falta bita'))
+  box.append(element('p', 'empty-note', 'Den conecta las herramientas que tengas instaladas. Esta se instala así:'))
+  box.append(element('code', 'problem-hint', installHint(tools, 'bita')))
+  const open = element('button', 'ghost-button wide', 'Ver las herramientas') as HTMLButtonElement
+  open.type = 'button'
+  open.addEventListener('click', () => void showSettings())
+  box.append(open)
+  return box
+}
 
 function isTab(value: string): value is Tab {
   return (TABS as readonly string[]).includes(value)
@@ -246,7 +291,8 @@ function editForm(timer: LiveTimer): HTMLElement {
   const kindField = element('label', 'field')
   kindField.append(element('span', 'field-label', 'Tipo'))
   const kindSelect = document.createElement('select')
-  for (const [value, label] of [['', 'Trabajo'], ...Object.entries(MEETING_KINDS)]) {
+  const kinds = enabled('meetingKinds') || isMeetingKind(draftKind) ? Object.entries(MEETING_KINDS) : []
+  for (const [value, label] of [['', 'Trabajo'], ...kinds]) {
     const option = document.createElement('option')
     option.value = value ?? ''
     option.textContent = label ?? ''
@@ -331,6 +377,12 @@ function problemBlock(problem: Problem): HTMLElement {
 function renderAhora(): void {
   view.replaceChildren()
 
+  if (!enabled('timers')) {
+    for (const meeting of proposals) view.append(proposalsCard(meeting))
+    view.append(missingBita())
+    return
+  }
+
   if (latest.problem !== null) {
     view.append(problemBlock(latest.problem))
     return
@@ -369,6 +421,10 @@ function renderAhora(): void {
 }
 
 async function loadTodayNotes(): Promise<void> {
+  if (!enabled('notes') || !enabled('timers')) {
+    notesOfToday = []
+    return
+  }
   try {
     const payload = await notesToday()
     notesOfToday = payload.data
@@ -380,6 +436,10 @@ async function loadTodayNotes(): Promise<void> {
 }
 
 async function loadLive(): Promise<void> {
+  if (!enabled('liveAssistant')) {
+    live = null
+    return
+  }
   try {
     live = await liveState()
   } catch {
@@ -389,6 +449,11 @@ async function loadLive(): Promise<void> {
 }
 
 async function loadProposals(): Promise<void> {
+  if (!enabled('proposals')) {
+    proposals = []
+    notesButton.classList.remove('icon-button--dot')
+    return
+  }
   try {
     proposals = await pendingProposals()
   } catch {
@@ -419,7 +484,7 @@ function tickClocks(): void {
 function paint(): void {
   todayTotal.textContent = human(latest.todaySeconds)
   barMark.dataset['idle'] = String(latest.running.length === 0)
-  launcher.hidden = inSettings || tab !== 'ahora' || editing !== null
+  launcher.hidden = inSettings || tab !== 'ahora' || editing !== null || !enabled('timers')
 
   if (inSettings || tab !== 'ahora') return
 
@@ -503,7 +568,6 @@ async function showSettings(): Promise<void> {
       report,
       () => {
         inSettings = false
-        tabStrip.hidden = false
         showTab(tab)
       },
       () => {
@@ -518,10 +582,11 @@ async function showSettings(): Promise<void> {
 
 function showTab(next: Tab): void {
   inSettings = false
-  tabStrip.hidden = false
-  tab = next
+  tab = visibleTabs().includes(next) ? next : 'ahora'
+  applyModules()
   painted = ''
-  launcher.hidden = next !== 'ahora'
+  launcher.hidden = tab !== 'ahora' || !enabled('timers')
+  next = tab
   if (next === 'ahora') {
     paint()
     return
@@ -569,7 +634,6 @@ async function start(): Promise<void> {
   gear.addEventListener('click', () => {
     if (inSettings) {
       inSettings = false
-      tabStrip.hidden = false
       showTab(tab)
       return
     }
@@ -606,8 +670,19 @@ async function start(): Promise<void> {
     if (document.visibilityState === 'visible') void loadProposals()
   })
 
+  onToolsChanged((status) => {
+    applyTools(status)
+  })
+
   latest = await snapshot()
   paint()
+
+  try {
+    tools = await toolsStatus()
+  } catch {
+    tools = null
+  }
+  applyModules()
 
   try {
     latest = await refresh()
@@ -616,20 +691,34 @@ async function start(): Promise<void> {
   }
   paint()
 
-  if (latest.problem !== null) {
+  const nothing = tools !== null && !tools.modules.timers && !tools.modules.notes && !tools.modules.meetings
+  if (nothing || (enabled('timers') && latest.problem !== null)) {
     void showSettings()
     return
   }
 
-  try {
-    catalog = await projects()
-  } catch {
-    catalog = []
+  if (enabled('timers')) {
+    try {
+      catalog = await projects()
+    } catch {
+      catalog = []
+    }
   }
 
   void loadTodayNotes()
   void loadLive()
   void loadProposals()
+}
+
+function applyTools(status: ToolsStatus): void {
+  tools = status
+  applyModules()
+  painted = ''
+  void loadTodayNotes()
+  void loadLive()
+  void loadProposals()
+  if (inSettings) return
+  showTab(tab)
 }
 
 void start()

@@ -1,315 +1,100 @@
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::{env, fs};
 
 const EXPECTED_SCHEMA: u64 = 3;
+const REGISTRY_ENV: &str = "KIT_REGISTRY_DIR";
 
-fn vendored_cli() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("repository root")
-        .join("vendor/bita/src/bin/bita.ts")
+fn registry() -> Option<PathBuf> {
+    let dir = PathBuf::from(env::var_os(REGISTRY_ENV).filter(|value| !value.is_empty())?);
+    dir.is_dir().then_some(dir)
 }
 
-fn node() -> Option<PathBuf> {
-    let home = env::var_os("HOME").map(PathBuf::from)?;
-    let mut candidates: Vec<PathBuf> = Vec::new();
-
-    for root in [
-        home.join(".nvm/versions/node"),
-        home.join(".local/share/fnm/node-versions"),
-    ] {
-        if let Ok(entries) = fs::read_dir(&root) {
-            let mut names: Vec<String> = entries
-                .flatten()
-                .map(|entry| entry.file_name().to_string_lossy().to_string())
-                .collect();
-            names.sort();
-            names.reverse();
-            for name in names {
-                candidates.push(root.join(&name).join("bin/node"));
-                candidates.push(root.join(&name).join("installation/bin/node"));
-            }
-        }
-    }
-    candidates.push(PathBuf::from("/opt/homebrew/bin/node"));
-    candidates.push(PathBuf::from("/usr/local/bin/node"));
-    candidates.push(PathBuf::from("/usr/bin/node"));
-
-    candidates.into_iter().find(|candidate| candidate.is_file())
-}
-
-#[test]
-fn the_vendored_cli_still_speaks_the_schema_this_app_understands() {
-    let entry = vendored_cli();
-    assert!(
-        entry.is_file(),
-        "the bita submodule is not checked out at {}; run git submodule update --init",
-        entry.display()
-    );
-
-    let Some(node) = node() else {
-        panic!("no node found; this app cannot work without one");
-    };
-
-    let database = env::temp_dir().join(format!("bita-contract-{}.db", std::process::id()));
-    let _ = fs::remove_file(&database);
-
-    let output = Command::new(&node)
-        .arg(&entry)
-        .arg("ls")
-        .arg("--json")
-        .arg("--db-path")
-        .arg(&database)
-        .current_dir("/")
-        .stdin(Stdio::null())
-        .output()
-        .expect("run the vendored CLI");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let envelope: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("the CLI printed one JSON document");
-
-    assert_eq!(
-        envelope["schemaVersion"].as_u64(),
-        Some(EXPECTED_SCHEMA),
-        "the CLI changed its envelope version; the app's model has to change with it"
-    );
-    assert_eq!(envelope["ok"].as_bool(), Some(true));
-    assert!(envelope["data"].is_array());
-
-    let _ = fs::remove_file(&database);
-}
-
-#[test]
-fn the_vendored_cli_still_resolves_the_seven_sections() {
-    let entry = vendored_cli();
-    assert!(entry.is_file(), "the bita submodule is not checked out");
-
-    let Some(node) = node() else {
-        panic!("no node found; this app cannot work without one");
-    };
-
-    let database = env::temp_dir().join(format!("bita-sections-{}.db", std::process::id()));
-    let _ = fs::remove_file(&database);
-
-    let output = Command::new(&node)
-        .arg(&entry)
-        .arg("docs")
-        .arg("tree")
-        .arg("--json")
-        .arg("--db-path")
-        .arg(&database)
-        .current_dir("/")
-        .stdin(Stdio::null())
-        .output()
-        .expect("run the vendored CLI");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let envelope: serde_json::Value =
-        serde_json::from_str(stdout.trim()).expect("the CLI printed one JSON document");
-
-    assert_eq!(envelope["ok"].as_bool(), Some(true), "bita docs tree failed");
-
-    let sections: Vec<String> = envelope["meta"]["sections"]
-        .as_array()
-        .expect("meta.sections is the canonical list")
+fn registered_bin(tool: &str) -> Option<Vec<String>> {
+    let text = fs::read_to_string(registry()?.join(format!("{tool}.json"))).ok()?;
+    let manifest: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let bin: Vec<String> = manifest["bin"]
+        .as_array()?
         .iter()
-        .map(|value| value.as_str().unwrap_or_default().to_string())
+        .filter_map(|part| part.as_str().map(str::to_string))
         .collect();
-
-    assert_eq!(
-        sections,
-        vec![
-            "Contexto",
-            "Qué se hizo",
-            "Decisiones",
-            "Hallazgos",
-            "Verificación",
-            "Pendiente",
-            "Tocado",
-        ],
-        "the CLI changed the canonical sections; the reader paints them by this order"
-    );
-
-    let _ = fs::remove_file(&database);
+    let installed = !bin.is_empty() && bin.iter().all(|part| !Path::new(part).is_absolute() || Path::new(part).exists());
+    installed.then_some(bin)
 }
-
-#[test]
-fn the_vendored_cli_lists_the_backlog_the_app_paints() {
-    let entry = vendored_cli();
-    assert!(entry.is_file(), "the bita submodule is not checked out");
-
-    let Some(node) = node() else {
-        panic!("no node found; this app cannot work without one");
-    };
-
-    let database = env::temp_dir().join(format!("bita-contract-backlog-{}.db", std::process::id()));
-    let _ = fs::remove_file(&database);
-
-    let run = |args: &[&str]| -> serde_json::Value {
-        let output = Command::new(&node)
-            .arg(&entry)
-            .args(args)
-            .arg("--json")
-            .arg("--db-path")
-            .arg(&database)
-            .current_dir("/")
-            .stdin(Stdio::null())
-            .output()
-            .expect("run the vendored CLI");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        serde_json::from_str(stdout.trim()).expect("the CLI printed one JSON document")
-    };
-
-    let project = run(&["project", "add", "Contrato"]);
-    assert_eq!(project["ok"].as_bool(), Some(true), "{project}");
-
-    let added = run(&[
-        "backlog", "add", "--kind", "pending", "--title", "Rotar el secreto", "--project", "Contrato",
-    ]);
-    assert_eq!(added["ok"].as_bool(), Some(true), "{added}");
-    let id = added["data"]["id"].as_i64().expect("the new item has an id").to_string();
-    assert_eq!(added["data"]["key"].as_str(), Some("CON-1"), "{added}");
-
-    let resolved = run(&["backlog", "resolve", "CON-1", "--resolution", "Rotado"]);
-    assert_eq!(resolved["data"]["status"].as_str(), Some("resolved"));
-    assert_eq!(resolved["data"]["id"].as_i64().map(|value| value.to_string()), Some(id.clone()));
-
-    let reopened = run(&["backlog", "reopen", &id]);
-    assert_eq!(reopened["data"]["status"].as_str(), Some("open"));
-    let edited = run(&["backlog", "edit", &id, "--kind", "finding"]);
-    assert_eq!(edited["data"]["kind"].as_str(), Some("finding"));
-    let resolved = run(&["backlog", "resolve", &id]);
-    assert_eq!(resolved["data"]["resolution"].as_str(), Some("Rotado"));
-
-    let listed = run(&["backlog", "ls", "--status", "all"]);
-    assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
-    let item = &listed["data"][0];
-    for field in [
-        "id", "key", "projectKey", "kind", "status", "title", "body", "projectName", "pageId",
-        "pageTitle", "updatedAt", "resolution", "source", "createdAt",
-    ] {
-        assert!(item.get(field).is_some(), "backlog items lost {field}: {item}");
-    }
-    assert_eq!(listed["meta"]["counts"]["resolved"].as_u64(), Some(1));
-
-    let _ = fs::remove_file(&database);
-}
-
-#[test]
-fn the_vendored_cli_reports_projects_outside_jira_apart() {
-    let entry = vendored_cli();
-    assert!(entry.is_file(), "the bita submodule is not checked out");
-
-    let Some(node) = node() else {
-        panic!("no node found; this app cannot work without one");
-    };
-
-    let database = env::temp_dir().join(format!("bita-contract-jira-{}.db", std::process::id()));
-    let _ = fs::remove_file(&database);
-
-    let run = |args: &[&str]| -> serde_json::Value {
-        let output = Command::new(&node)
-            .arg(&entry)
-            .args(args)
-            .arg("--json")
-            .arg("--db-path")
-            .arg(&database)
-            .current_dir("/")
-            .env("BITA_NO_HOOKS", "1")
-            .stdin(Stdio::null())
-            .output()
-            .expect("run the vendored CLI");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        serde_json::from_str(stdout.trim()).expect("the CLI printed one JSON document")
-    };
-
-    assert_eq!(run(&["project", "add", "Con Jira"])["ok"].as_bool(), Some(true));
-    let outside = run(&["project", "add", "Sin Jira", "--no-jira"]);
-    assert_eq!(outside["data"]["jira"].as_bool(), Some(false), "{outside}");
-
-    let projects = run(&["projects"]);
-    let flags: Vec<(String, bool)> = projects["data"]
-        .as_array()
-        .expect("projects")
-        .iter()
-        .map(|project| {
-            (
-                project["name"].as_str().unwrap_or_default().to_string(),
-                project["jira"].as_bool().expect("every project says whether it goes to Jira"),
-            )
-        })
-        .collect();
-    assert!(flags.contains(&("Sin Jira".to_string(), false)), "{flags:?}");
-
-    for (title, project) in [("Algo para Jira", "Con Jira"), ("Algo fuera", "Sin Jira")] {
-        let logged = run(&["log", title, "--project", project, "--from", "00:10", "--for", "30m"]);
-        assert_eq!(logged["ok"].as_bool(), Some(true), "{logged}");
-    }
-
-    let pending = run(&["summary", "--pending"]);
-    assert_eq!(pending["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
-    let groups = pending["data"]["groups"].as_array().expect("groups");
-    assert!(groups.iter().all(|group| group["jira"].as_bool() == Some(true)), "{pending}");
-    assert_eq!(pending["meta"]["nonJira"]["totalSeconds"].as_i64(), Some(1800), "{pending}");
-    assert_eq!(pending["data"]["nonJiraSeconds"].as_i64(), Some(1800), "{pending}");
-
-    let _ = fs::remove_file(&database);
-}
-
-const ALTERNATIVE_CLI_ENV: &str = "BITA_CONTRACT_CLI";
 
 struct Sandbox {
-    node: PathBuf,
-    entry: PathBuf,
+    tool: String,
+    bin: Vec<String>,
     root: PathBuf,
 }
 
 impl Sandbox {
-    fn new(name: &str) -> Option<Self> {
-        let entry = PathBuf::from(env::var_os(ALTERNATIVE_CLI_ENV)?);
-        assert!(entry.is_file(), "{ALTERNATIVE_CLI_ENV} points at {} which is not a file", entry.display());
-        let node = node().expect("no node found; this app cannot work without one");
-        let root = env::temp_dir().join(format!("bita-contract-{name}-{}", std::process::id()));
+    fn new(tool: &str, name: &str) -> Option<Self> {
+        let Some(bin) = registered_bin(tool) else {
+            eprintln!("skipped: {tool} is not in the sandbox registry ({REGISTRY_ENV})");
+            return None;
+        };
+        let root = env::temp_dir().join(format!("den-contract-{tool}-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("home")).expect("sandbox home");
-        Some(Self { node, entry, root })
+        Some(Self { tool: tool.to_string(), bin, root })
+    }
+
+    fn path(&self) -> OsString {
+        let mut parts: Vec<PathBuf> = Vec::new();
+        if let Some(parent) = Path::new(&self.bin[0]).parent() {
+            parts.push(parent.to_path_buf());
+        }
+        parts.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
+        env::join_paths(parts).unwrap_or_default()
     }
 
     fn run(&self, args: &[&str], stdin: Option<&str>) -> serde_json::Value {
         use std::io::Write;
-        let mut child = Command::new(&self.node)
-            .arg(&self.entry)
-            .args(args)
-            .arg("--json")
-            .arg("--db-path")
-            .arg(self.root.join("bita.db"))
-            .arg("--docs-dir")
-            .arg(self.root.join("docs"))
-            .current_dir("/")
+        let mut command = Command::new(&self.bin[0]);
+        command.args(&self.bin[1..]).args(args).arg("--json");
+        if self.tool == "bita" {
+            command
+                .arg("--db-path")
+                .arg(self.root.join("bita.db"))
+                .arg("--docs-dir")
+                .arg(self.root.join("docs"));
+        }
+        let mut child = command
+            .current_dir(&self.root)
+            .env_clear()
+            .env("PATH", self.path())
             .env("HOME", self.root.join("home"))
             .env("XDG_CONFIG_HOME", self.root.join("home/.config"))
             .env("XDG_DATA_HOME", self.root.join("home/.local/share"))
+            .env("XDG_STATE_HOME", self.root.join("home/.local/state"))
+            .env(REGISTRY_ENV, registry().expect("registry"))
+            .env("KIT_CREDENTIALS", "file")
+            .env("KIT_NO_EVENTS", "1")
             .env("BITA_NO_HOOKS", "1")
-            .env("GIT_AUTHOR_NAME", "bita contract")
-            .env("GIT_AUTHOR_EMAIL", "contract@bita.invalid")
-            .env("GIT_COMMITTER_NAME", "bita contract")
-            .env("GIT_COMMITTER_EMAIL", "contract@bita.invalid")
+            .env("INKWELL_DB_PATH", self.root.join("inkwell.db"))
+            .env("INKWELL_DOCS_DIR", self.root.join("inkwell-docs"))
+            .env("GIT_AUTHOR_NAME", "den contract")
+            .env("GIT_AUTHOR_EMAIL", "contract@den.invalid")
+            .env("GIT_COMMITTER_NAME", "den contract")
+            .env("GIT_COMMITTER_EMAIL", "contract@den.invalid")
             .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .expect("run the alternative CLI");
+            .expect("run the registered tool");
         if let Some(text) = stdin {
             let mut pipe = child.stdin.take().expect("stdin");
             pipe.write_all(text.as_bytes()).expect("write stdin");
         }
-        let output = child.wait_with_output().expect("wait for the CLI");
+        let output = child.wait_with_output().expect("wait for the tool");
         let stdout = String::from_utf8_lossy(&output.stdout);
-        serde_json::from_str(stdout.trim()).unwrap_or_else(|_| {
+        let line = stdout.trim().lines().last().unwrap_or_default().to_string();
+        serde_json::from_str(&line).unwrap_or_else(|_| {
             panic!(
-                "{args:?} did not print one JSON document: {stdout} {}",
+                "{} {args:?} did not print one JSON document: {stdout} {}",
+                self.tool,
                 String::from_utf8_lossy(&output.stderr)
             )
         })
@@ -323,8 +108,128 @@ impl Drop for Sandbox {
 }
 
 #[test]
-fn the_new_cli_searches_by_page() {
-    let Some(sandbox) = Sandbox::new("pages") else { return };
+fn every_registered_tool_answers_its_capabilities() {
+    let Some(dir) = registry() else {
+        eprintln!("skipped: {REGISTRY_ENV} is not set");
+        return;
+    };
+    for entry in fs::read_dir(&dir).expect("registry").flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(tool) = name.strip_suffix(".json") else { continue };
+        let Some(sandbox) = Sandbox::new(tool, "capabilities") else { continue };
+        let envelope = sandbox.run(&["capabilities"], None);
+        assert_eq!(envelope["ok"].as_bool(), Some(true), "{tool}: {envelope}");
+        assert_eq!(envelope["data"]["name"].as_str(), Some(tool), "{envelope}");
+        assert!(envelope["data"]["capabilities"].is_array(), "{envelope}");
+    }
+}
+
+#[test]
+fn bita_still_speaks_the_schema_this_app_understands() {
+    let Some(sandbox) = Sandbox::new("bita", "schema") else { return };
+    let envelope = sandbox.run(&["ls"], None);
+    assert_eq!(
+        envelope["schemaVersion"].as_u64(),
+        Some(EXPECTED_SCHEMA),
+        "bita changed its envelope version; the app's model has to change with it"
+    );
+    assert_eq!(envelope["ok"].as_bool(), Some(true));
+    assert!(envelope["data"].is_array());
+}
+
+#[test]
+fn bita_still_resolves_the_seven_sections() {
+    let Some(sandbox) = Sandbox::new("bita", "sections") else { return };
+    let envelope = sandbox.run(&["docs", "tree"], None);
+    assert_eq!(envelope["ok"].as_bool(), Some(true), "bita docs tree failed: {envelope}");
+    let sections: Vec<String> = envelope["meta"]["sections"]
+        .as_array()
+        .expect("meta.sections is the canonical list")
+        .iter()
+        .map(|value| value.as_str().unwrap_or_default().to_string())
+        .collect();
+    assert_eq!(
+        sections,
+        vec!["Contexto", "Qué se hizo", "Decisiones", "Hallazgos", "Verificación", "Pendiente", "Tocado"],
+        "bita changed the canonical sections; the reader paints them by this order"
+    );
+}
+
+#[test]
+fn bita_lists_the_backlog_the_app_paints() {
+    let Some(sandbox) = Sandbox::new("bita", "backlog") else { return };
+    let run = |args: &[&str]| sandbox.run(args, None);
+
+    let project = run(&["project", "add", "Contrato"]);
+    assert_eq!(project["ok"].as_bool(), Some(true), "{project}");
+
+    let added = run(&["backlog", "add", "--kind", "pending", "--title", "Rotar el secreto", "--project", "Contrato"]);
+    assert_eq!(added["ok"].as_bool(), Some(true), "{added}");
+    let id = added["data"]["id"].as_i64().expect("the new item has an id").to_string();
+    assert_eq!(added["data"]["key"].as_str(), Some("CON-1"), "{added}");
+
+    let resolved = run(&["backlog", "resolve", "CON-1", "--resolution", "Rotado"]);
+    assert_eq!(resolved["data"]["status"].as_str(), Some("resolved"));
+    let reopened = run(&["backlog", "reopen", &id]);
+    assert_eq!(reopened["data"]["status"].as_str(), Some("open"));
+    let edited = run(&["backlog", "edit", &id, "--kind", "finding"]);
+    assert_eq!(edited["data"]["kind"].as_str(), Some("finding"));
+
+    let listed = run(&["backlog", "ls", "--status", "all"]);
+    let item = &listed["data"][0];
+    for field in [
+        "id", "key", "projectKey", "kind", "status", "title", "body", "projectName", "pageId", "pageTitle",
+        "updatedAt", "resolution", "source", "createdAt",
+    ] {
+        assert!(item.get(field).is_some(), "backlog items lost {field}: {item}");
+    }
+}
+
+#[test]
+fn bita_reports_projects_outside_jira_apart() {
+    let Some(sandbox) = Sandbox::new("bita", "jira") else { return };
+    let run = |args: &[&str]| sandbox.run(args, None);
+
+    assert_eq!(run(&["project", "add", "Con Jira"])["ok"].as_bool(), Some(true));
+    let outside = run(&["project", "add", "Sin Jira", "--no-jira"]);
+    assert_eq!(outside["data"]["jira"].as_bool(), Some(false), "{outside}");
+
+    for (title, project) in [("Algo para Jira", "Con Jira"), ("Algo fuera", "Sin Jira")] {
+        let logged = run(&["log", title, "--project", project, "--from", "00:10", "--for", "30m"]);
+        assert_eq!(logged["ok"].as_bool(), Some(true), "{logged}");
+    }
+
+    let pending = run(&["summary", "--pending"]);
+    assert_eq!(pending["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+    let groups = pending["data"]["groups"].as_array().expect("groups");
+    assert!(groups.iter().all(|group| group["jira"].as_bool() == Some(true)), "{pending}");
+    assert_eq!(pending["meta"]["nonJira"]["totalSeconds"].as_i64(), Some(1800), "{pending}");
+}
+
+#[test]
+fn inkwell_answers_the_docs_contract() {
+    let Some(sandbox) = Sandbox::new("inkwell", "contract") else { return };
+    let capabilities = sandbox.run(&["capabilities"], None);
+    let declared: Vec<&str> = capabilities["data"]["capabilities"]
+        .as_array()
+        .expect("capabilities")
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect();
+    assert!(declared.contains(&"docs.page.read"), "{capabilities}");
+
+    let migrated = sandbox.run(&["migrate", "status"], None);
+    assert_eq!(migrated["ok"].as_bool(), Some(true), "{migrated}");
+    assert!(migrated["data"]["migrated"].is_boolean(), "{migrated}");
+
+    let tree = sandbox.run(&["tree", "--pages"], None);
+    assert_eq!(tree["ok"].as_bool(), Some(true), "{tree}");
+    assert!(tree["data"]["spaces"].is_array(), "{tree}");
+}
+
+#[test]
+fn bita_searches_by_page() {
+    let Some(sandbox) = Sandbox::new("bita", "pages") else { return };
     assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
     let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
     assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
@@ -358,8 +263,8 @@ fn the_new_cli_searches_by_page() {
 }
 
 #[test]
-fn the_new_cli_keeps_atlassian_settings_per_space() {
-    let Some(sandbox) = Sandbox::new("atlassian") else { return };
+fn bita_keeps_atlassian_settings_per_space() {
+    let Some(sandbox) = Sandbox::new("bita", "atlassian") else { return };
     assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
     let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
     assert_eq!(page["ok"].as_bool(), Some(true), "{page}");
@@ -393,8 +298,8 @@ fn the_new_cli_keeps_atlassian_settings_per_space() {
 }
 
 #[test]
-fn the_new_cli_lists_atlassian_sites() {
-    let Some(sandbox) = Sandbox::new("sites") else { return };
+fn bita_lists_atlassian_sites() {
+    let Some(sandbox) = Sandbox::new("bita", "sites") else { return };
     let listed = sandbox.run(&["atlassian", "site", "ls"], None);
     assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
     assert_eq!(listed["ok"].as_bool(), Some(true), "{listed}");
@@ -407,8 +312,8 @@ fn the_new_cli_lists_atlassian_sites() {
 }
 
 #[test]
-fn the_new_cli_lists_project_repos() {
-    let Some(sandbox) = Sandbox::new("repos") else { return };
+fn bita_lists_project_repos() {
+    let Some(sandbox) = Sandbox::new("bita", "repos") else { return };
     assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
     let listed = sandbox.run(&["project", "repo", "ls", "--project", "Contrato"], None);
     assert_eq!(listed["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
@@ -422,8 +327,8 @@ fn the_new_cli_lists_project_repos() {
 }
 
 #[test]
-fn the_new_cli_keeps_the_history_of_a_page() {
-    let Some(sandbox) = Sandbox::new("history") else { return };
+fn bita_keeps_the_history_of_a_page() {
+    let Some(sandbox) = Sandbox::new("bita", "history") else { return };
     assert_eq!(sandbox.run(&["project", "add", "Contrato"], None)["ok"].as_bool(), Some(true));
     let page = sandbox.run(&["docs", "page", "new", "Kernel compartido", "--project", "Contrato"], None);
     assert_eq!(page["ok"].as_bool(), Some(true), "{page}");

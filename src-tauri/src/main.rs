@@ -3,6 +3,7 @@ mod ask;
 mod atlassian_cmd;
 mod cli;
 mod commands;
+mod docs;
 mod doctor;
 mod menu;
 mod model;
@@ -13,13 +14,16 @@ mod live_wide;
 mod meeting;
 mod notes_cmd;
 mod panel;
-mod pasteboard;
 mod pdf;
+mod platform;
 mod proposals;
 mod recap;
+mod registry;
+#[cfg(target_os = "macos")]
 mod screen;
 mod state;
 mod sync;
+mod tools;
 mod tray;
 mod watch;
 
@@ -37,11 +41,15 @@ const REFRESH: Duration = Duration::from_secs(30);
 const SNAPSHOT_EVENT: &str = "bita://snapshot";
 
 fn main() {
+    if tools::print_status_and_exit() {
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             panel::toggle(app);
         }))
         .plugin(live::shortcut_plugin())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::new())
         .manage(live::LiveSession::default())
         .manage(TrayAnchor::default())
@@ -62,7 +70,7 @@ fn main() {
             commands::set_scope,
             commands::unset_scope,
             commands::doctor_report,
-            commands::install_cli,
+            tools::tools_status,
             commands::open_notes,
             commands::notes_take_focus,
             notes_cmd::notes_tree,
@@ -132,12 +140,17 @@ fn main() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            tools::migrate_app_settings(app.handle());
             menu::create(app.handle())?;
             tray::create(app.handle())?;
             panel::wire(app.handle());
             watch::spawn(app.handle().clone(), cli::database_path());
-            watch::spawn_docs(app.handle().clone(), cli::docs_root());
+            watch::spawn_docs(app.handle().clone(), cli::bita_docs_root());
+            tools::ensure_inkwell_watchers(app.handle());
+            tools::spawn_watch(app.handle().clone());
+            tools::warm(app.handle().clone());
             live::register_shortcut(app.handle());
             live::spawn_watch(app.handle().clone());
             spawn_refresh(app.handle().clone());
@@ -149,7 +162,7 @@ fn main() {
             Ok(())
         })
         .run(tauri::generate_context!())
-        .expect("failed to start bita-desktop");
+        .expect("failed to start Den");
 }
 
 fn spawn_refresh(app: AppHandle) {

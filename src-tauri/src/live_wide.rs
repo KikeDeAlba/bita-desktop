@@ -6,7 +6,9 @@ const WIDTH: f64 = 1280.0;
 const HEIGHT: f64 = 820.0;
 const MIN_WIDTH: f64 = 900.0;
 const MIN_HEIGHT: f64 = 560.0;
+#[cfg(target_os = "macos")]
 const TRAFFIC_X: f64 = 16.0;
+#[cfg(target_os = "macos")]
 const TRAFFIC_Y: f64 = 18.0;
 
 pub fn find(app: &AppHandle) -> Option<WebviewWindow> {

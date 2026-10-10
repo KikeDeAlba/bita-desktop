@@ -1,5 +1,6 @@
 use tauri::{AppHandle, Manager};
 
+#[cfg(target_os = "macos")]
 const KEEP_ACCESSORY_ENV: &str = "BITA_KEEP_ACCESSORY";
 
 pub const NORMAL_WINDOWS: [&str; 2] = [crate::notes::LABEL, crate::live_wide::LABEL];

@@ -1,4 +1,6 @@
-const MODIFIER_GLYPH: Record<string, string> = {
+import { os, type Os } from './platform.ts'
+
+const MAC_MODIFIER: Record<string, string> = {
   ctrl: '⌃',
   control: '⌃',
   alt: '⌥',
@@ -12,29 +14,56 @@ const MODIFIER_GLYPH: Record<string, string> = {
   commandorcontrol: '⌘',
 }
 
+const PC_MODIFIER: Record<string, string> = {
+  ctrl: 'Ctrl',
+  control: 'Ctrl',
+  alt: 'Alt',
+  option: 'Alt',
+  shift: 'Shift',
+  cmd: 'Super',
+  command: 'Super',
+  super: 'Super',
+  meta: 'Super',
+  cmdorctrl: 'Ctrl',
+  commandorcontrol: 'Ctrl',
+}
+
 const KEY_LABEL: Record<string, string> = {
   space: 'Espacio',
-  enter: '↩',
-  return: '↩',
   escape: 'Esc',
-  tab: '⇥',
-  backspace: '⌫',
   arrowup: '↑',
   arrowdown: '↓',
   arrowleft: '←',
   arrowright: '→',
 }
 
+const MAC_KEY: Record<string, string> = {
+  enter: '↩',
+  return: '↩',
+  tab: '⇥',
+  backspace: '⌫',
+}
+
+const PC_KEY: Record<string, string> = {
+  enter: 'Enter',
+  return: 'Enter',
+  tab: 'Tab',
+  backspace: 'Retroceso',
+}
+
 const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift', 'Cmd']
 
-export function shortcutLabel(accelerator: string): string {
+export function shortcutLabel(accelerator: string, platform: Os = os): string {
   if (accelerator.trim().length === 0) return 'sin atajo'
+  const mac = platform === 'macos'
+  const glyphs = mac ? MAC_MODIFIER : { ...PC_MODIFIER, ...(platform === 'windows' ? { cmd: 'Win', command: 'Win', super: 'Win', meta: 'Win' } : {}) }
+  const keys = mac ? MAC_KEY : PC_KEY
   const parts = accelerator.split('+').map((part) => part.trim()).filter((part) => part.length > 0)
   const key = parts.pop() ?? ''
-  const modifiers = parts.map((part) => MODIFIER_GLYPH[part.toLowerCase()] ?? part).join('')
+  const modifiers = parts.map((part) => glyphs[part.toLowerCase()] ?? part)
   const lowered = key.toLowerCase()
-  const name = KEY_LABEL[lowered] ?? (lowered.startsWith('key') && key.length === 4 ? key.slice(3) : key.length === 1 ? key.toUpperCase() : key)
-  return `${modifiers}${name}`
+  const name = KEY_LABEL[lowered] ?? keys[lowered] ?? (lowered.startsWith('key') && key.length === 4 ? key.slice(3) : key.length === 1 ? key.toUpperCase() : key)
+  return mac ? `${modifiers.join('')}${name}` : [...modifiers, name].join('+')
 }
 
 function keyName(event: KeyboardEvent): string | null {

@@ -1,20 +1,27 @@
+#[cfg(target_os = "macos")]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::AppHandle;
 
 pub const LIVE: &str = "live-assist";
 pub const LIVE_WIDE: &str = "live-wide";
 
+#[cfg(not(target_os = "macos"))]
+pub fn create(_app: &AppHandle) -> tauri::Result<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let bita = Submenu::with_items(
         app,
-        "bita",
+        "Den",
         true,
         &[
-            &PredefinedMenuItem::about(app, Some("Acerca de bita"), None)?,
+            &PredefinedMenuItem::about(app, Some("Acerca de Den"), None)?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, Some("Ocultar bita"))?,
+            &PredefinedMenuItem::hide(app, Some("Ocultar Den"))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, Some("Salir de bita"))?,
+            &PredefinedMenuItem::quit(app, Some("Salir de Den"))?,
         ],
     )?;
 
