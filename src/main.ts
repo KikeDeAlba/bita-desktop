@@ -35,7 +35,7 @@ import {
   type Project,
   type Scope,
   type Snapshot,
-  type SummaryView,
+  type WorkedView,
   type ToolsStatus,
   installHint,
 } from './bita.ts'
@@ -86,8 +86,14 @@ function enabled(module: keyof ToolsStatus['modules']): boolean {
   return tools === null || tools.modules[module]
 }
 
+const TAB_MODULE: Record<Exclude<Tab, 'ahora'>, keyof ToolsStatus['modules']> = {
+  hoy: 'hoy',
+  jira: 'jira',
+  repos: 'timers',
+}
+
 function visibleTabs(): Tab[] {
-  return TABS.filter((name) => name === 'ahora' || enabled('timers'))
+  return TABS.filter((name) => name === 'ahora' || enabled(TAB_MODULE[name]))
 }
 
 function applyModules(): void {
@@ -421,7 +427,7 @@ function renderAhora(): void {
 }
 
 async function loadTodayNotes(): Promise<void> {
-  if (!enabled('notes') || !enabled('timers')) {
+  if (!enabled('entryNotes') || !enabled('timers')) {
     notesOfToday = []
     return
   }
@@ -500,7 +506,7 @@ function paint(): void {
 async function loadWorked(): Promise<void> {
   busyView()
   try {
-    const data: SummaryView = await worked(workedRange)
+    const data: WorkedView = await worked(workedRange)
     if (tab !== 'hoy') return
     renderWorked(view, data, workedRange, (next) => {
       workedRange = next

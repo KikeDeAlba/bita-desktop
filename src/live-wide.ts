@@ -442,7 +442,7 @@ function sourceRow(source: AnswerSource): HTMLElement {
   const row = document.createElement('button')
   row.type = 'button'
   row.className = `wide-source wide-source--${kind}`
-  const where = kind === 'page' ? 'página de bita' : (source.repo ?? (kind === 'commit' ? 'commit' : 'archivo'))
+  const where = kind === 'page' ? 'página de inkwell' : (source.repo ?? (kind === 'commit' ? 'commit' : 'archivo'))
   row.append(sourceIcon(kind, 14), element('span', 'wide-source-label', source.label), element('span', 'wide-source-where', where))
   const action = sourceAction(source, actions)
   if (action === null) {

@@ -239,7 +239,7 @@ function hintCard(): HTMLElement {
   words.append(element('span', 'live-hint-title', view.active === null ? 'Sin reunión en curso' : 'Sin preguntas todavía'))
   const where =
     view.project === null
-      ? 'Se busca en las páginas de bita y en los repos del proyecto.'
+      ? 'Se busca en las páginas de inkwell y en los repos del proyecto.'
       : repoCount === null
         ? `Se busca en las páginas de ${view.project} y en sus repos.`
         : `Se busca en las páginas de ${view.project} y en ${repoCount === 1 ? 'su repo' : `sus ${repoCount} repos`}.`

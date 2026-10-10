@@ -5,6 +5,7 @@ mod cli;
 mod commands;
 mod docs;
 mod doctor;
+mod worked;
 mod menu;
 mod model;
 mod notes;
@@ -147,7 +148,6 @@ fn main() {
             tray::create(app.handle())?;
             panel::wire(app.handle());
             watch::spawn(app.handle().clone(), cli::database_path());
-            watch::spawn_docs(app.handle().clone(), cli::bita_docs_root());
             tools::ensure_inkwell_watchers(app.handle());
             tools::spawn_watch(app.handle().clone());
             tools::warm(app.handle().clone());

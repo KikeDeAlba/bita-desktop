@@ -7,7 +7,6 @@ import {
   describeProblem,
   projectAtlassian,
   type AtlassianSite,
-  type AtlassianVia,
   type PageNode,
   type Problem,
   type Space,
@@ -35,7 +34,6 @@ type RefKind = 'space' | 'page'
 
 interface Draft {
   site: string
-  via: AtlassianVia
   refKind: RefKind
   url: string
   pull: boolean
@@ -75,7 +73,6 @@ let root: HTMLElement | null = null
 function draftOf(atlassian: SpaceAtlassian | null | undefined): Draft {
   return {
     site: atlassian?.site ?? '',
-    via: atlassian?.via ?? 'mcp',
     refKind: atlassian?.confluence?.kind ?? 'page',
     url: atlassian?.confluence?.url ?? atlassian?.confluence?.spaceKey ?? '',
     pull: atlassian?.sync.pull ?? false,
@@ -250,7 +247,7 @@ function general(current: SpaceSettingsContext): HTMLElement[] {
     fact('Entradas medidas', String(current.space.entryCount)),
     fact('Carpeta', current.space.projectSlug),
   )
-  section.append(grid, element('p', 'ss-note', 'El nombre, el cliente y la clave de Jira se cambian con bita desde Claude o la terminal.'))
+  section.append(grid, element('p', 'ss-note', 'El nombre del espacio se cambia con inkwell; el proyecto de Jira, con tally. Las dos cosas, desde Claude o la terminal.'))
   return [section]
 }
 
@@ -397,27 +394,10 @@ function connectionCard(current: SpaceSettingsContext, value: Draft): HTMLElemen
   field.append(dot, select, icon('chevronDown', 12))
   row.append(labelled('Sitio', field, true))
 
-  row.append(
-    labelled(
-      'Cómo habla Claude con Jira y Confluence',
-      segmented<AtlassianVia>(
-        'Vía',
-        [
-          { value: 'mcp', label: 'MCP de Atlassian · predeterminado' },
-          { value: 'cli', label: 'bita CLI' },
-        ],
-        value.via,
-        (via) => {
-          value.via = via
-          paint(false)
-        },
-      ),
-    ),
-  )
   section.append(row)
   if (sitesFailure !== null) section.append(problemLine(sitesFailure))
   else if (sites !== null && sites.length === 0) {
-    section.append(element('p', 'ss-note', 'Todavía no hay organizaciones guardadas para bita CLI. Agrégalas en «Administrar conexiones».'))
+    section.append(element('p', 'ss-note', 'Todavía no hay organizaciones guardadas en atl. Agrégalas en «Administrar conexiones».'))
   }
   if (chosen?.status === 'auth_failed') {
     section.append(problemLine({ kind: 'cli-failed', message: 'El token guardado para este sitio ya no sirve.', hint: 'Renuévalo en «Administrar conexiones».' }))
@@ -545,11 +525,11 @@ function syncCard(current: SpaceSettingsContext, value: Draft): HTMLElement {
 
   const toggles = element('div', 'ss-toggles')
   toggles.append(
-    toggle('ss-pull', 'Confluence → bita', 'Trae a bita lo que cambie en Confluence. Apágalo y bita sigue creciendo como tus notas locales.', value.pull, (on) => {
+    toggle('ss-pull', 'Confluence → inkwell', 'Trae a inkwell lo que cambie en Confluence. Apágalo y las páginas siguen creciendo como tus notas locales.', value.pull, (on) => {
       value.pull = on
       paint(false)
     }),
-    toggle('ss-push', 'bita → Confluence', 'Publica en Confluence lo que agregues en bita. Apágalo y Confluence se queda como está.', value.push, (on) => {
+    toggle('ss-push', 'inkwell → Confluence', 'Publica en Confluence lo que agregues en inkwell. Apágalo y Confluence se queda como está.', value.push, (on) => {
       value.push = on
       paint(false)
     }),
@@ -581,7 +561,7 @@ function syncCard(current: SpaceSettingsContext, value: Draft): HTMLElement {
 function mappingTable(): HTMLElement {
   const list = element('div', 'ss-map')
   const head = element('div', 'ss-map-row ss-map-row--head')
-  head.append(element('span', 'v2-kbd', 'En bita'), element('span'), element('span', 'v2-kbd', 'En Confluence'), element('span', 'v2-kbd', 'Estado'))
+  head.append(element('span', 'v2-kbd', 'En inkwell'), element('span'), element('span', 'v2-kbd', 'En Confluence'), element('span', 'v2-kbd', 'Estado'))
   list.append(head)
   if (mappingsFailure !== null) {
     list.append(problemLine(mappingsFailure))
@@ -609,7 +589,7 @@ function mappingTable(): HTMLElement {
     if (conflict) {
       const actions = element('div', 'ss-map-actions')
       const busy = resolving.has(mapping.pageId)
-      const local = button('Quedarme con bita', 'v2-btn', () => void resolve(mapping.pageId, 'local'))
+      const local = button('Quedarme con inkwell', 'v2-btn', () => void resolve(mapping.pageId, 'local'))
       const remote = button('Usar Confluence', 'v2-btn', () => void resolve(mapping.pageId, 'remote'))
       local.disabled = busy
       remote.disabled = busy
@@ -658,7 +638,6 @@ async function saveDraft(): Promise<void> {
   try {
     await projectAtlassian(slug, {
       site: draft.site.length > 0 ? draft.site : null,
-      via: draft.via,
       confluence: draft.url.trim().length > 0 ? draft.url.trim() : 'none',
       pull: draft.pull,
       push: draft.push,

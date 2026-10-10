@@ -16,7 +16,6 @@ use crate::model::{CliError, Envelope, Problem, ProblemKind, SUPPORTED_SCHEMA};
 use crate::registry::{self, Origin, Tool};
 
 const DB_OVERRIDE_ENV: &str = "BITA_DB_PATH";
-const DOCS_OVERRIDE_ENV: &str = "BITA_DOCS_DIR";
 const EDITOR_OVERRIDE_ENV: &str = "BITA_EDITOR";
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -131,10 +130,6 @@ impl Cli {
         if self.tool == Tool::Bita {
             list.push("--db-path".into());
             list.push(self.db_path.clone().into_os_string());
-            if let Some(docs) = env::var_os(DOCS_OVERRIDE_ENV) {
-                list.push("--docs-dir".into());
-                list.push(docs);
-            }
         }
         list
     }
@@ -267,36 +262,11 @@ fn shim_targets(text: &str) -> Vec<&str> {
 }
 
 pub fn docs_root() -> PathBuf {
-    let inkwell = registry::global()
-        .cached_status()
-        .is_some_and(|status| status.docs == Some(registry::DocsProvider::Inkwell));
-    if inkwell {
-        return registry::inkwell_docs_root();
-    }
-    bita_docs_root()
+    registry::inkwell_docs_root()
 }
 
 pub fn docs_roots() -> Vec<PathBuf> {
-    let first = docs_root();
-    let mut roots = vec![first.clone()];
-    for other in [bita_docs_root(), registry::inkwell_docs_root()] {
-        if !roots.contains(&other) {
-            roots.push(other);
-        }
-    }
-    roots
-}
-
-pub fn bita_docs_root() -> PathBuf {
-    if let Some(explicit) = env::var_os(DOCS_OVERRIDE_ENV) {
-        return PathBuf::from(explicit);
-    }
-
-    let database = database_path();
-    match database.parent() {
-        Some(parent) => parent.join("docs"),
-        None => env::temp_dir().join("docs"),
-    }
+    vec![docs_root()]
 }
 
 pub fn editor_override() -> Option<OsString> {

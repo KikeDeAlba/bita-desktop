@@ -154,6 +154,22 @@ export interface SummaryView {
   excluded: Excluded[]
 }
 
+export interface WorkedGroup {
+  summary: string
+  projectId: number | null
+  projectName: string | null
+  totalSeconds: number
+  entryIds: number[]
+  days: string[]
+  running: boolean
+}
+
+export interface WorkedView {
+  totalSeconds: number
+  groups: WorkedGroup[]
+  overlaps: Overlap[]
+}
+
 export interface Scope {
   prefix: string
   projectId: number
@@ -161,8 +177,8 @@ export interface Scope {
   slugSource: string
 }
 
-export function worked(range: 'today' | 'week'): Promise<SummaryView> {
-  return invoke<SummaryView>('worked', { range })
+export function worked(range: 'today' | 'week'): Promise<WorkedView> {
+  return invoke<WorkedView>('worked', { range })
 }
 
 export function pending(): Promise<SummaryView> {
@@ -211,7 +227,7 @@ export function doctorReport(): Promise<Report> {
   return invoke<Report>('doctor_report')
 }
 
-export type ToolName = 'bita' | 'inkwell' | 'atl' | 'recap'
+export type ToolName = 'bita' | 'inkwell' | 'tally' | 'atl' | 'recap'
 
 export type ToolState = 'ready' | 'unresponsive' | 'broken-bin' | 'missing'
 
@@ -231,7 +247,10 @@ export interface ToolStatus {
 
 export interface Modules {
   timers: boolean
+  hoy: boolean
+  jira: boolean
   notes: boolean
+  entryNotes: boolean
   backlog: boolean
   history: boolean
   proposals: boolean
@@ -248,13 +267,15 @@ export interface ToolsStatus {
   tools: ToolStatus[]
   invalid: { file: string; problems: string[] }[]
   modules: Modules
-  docs: 'inkwell' | 'bita' | null
   inkwellMigrated: boolean | null
 }
 
 export const NO_MODULES: Modules = {
   timers: false,
+  hoy: false,
+  jira: false,
   notes: false,
+  entryNotes: false,
   backlog: false,
   history: false,
   proposals: false,
@@ -277,7 +298,7 @@ export function onToolsChanged(handler: (status: ToolsStatus) => void): void {
 }
 
 export function installHint(status: ToolsStatus | null, tool: ToolName): string {
-  return status?.tools.find((found) => found.name === tool)?.install ?? `npm i -g @kikedealba/${tool} && ${tool} setup`
+  return status?.tools.find((found) => found.name === tool)?.install ?? `npm install -g @kikedealba/${tool} && ${tool} setup`
 }
 
 export function openNotes(entryId: number | null): Promise<void> {
@@ -754,8 +775,6 @@ export interface PageSearchHit {
   matches: PageSearchMatch[]
 }
 
-export type AtlassianVia = 'mcp' | 'cli'
-
 export interface ConfluenceRef {
   kind: 'space' | 'page'
   url: string
@@ -766,7 +785,6 @@ export interface ConfluenceRef {
 
 export interface SpaceAtlassian {
   site: string | null
-  via: AtlassianVia
   confluence: ConfluenceRef | null
   sync: { pull: boolean; push: boolean; lastSyncAt: string | null }
 }
@@ -810,7 +828,6 @@ export interface SyncMapping {
 
 export interface AtlassianSettings {
   site?: string | null
-  via?: AtlassianVia | null
   confluence?: string | null
   pull?: boolean | null
   push?: boolean | null
