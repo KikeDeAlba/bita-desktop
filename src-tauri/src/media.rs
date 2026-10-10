@@ -6,7 +6,6 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
-use tokio::process::Command;
 
 use crate::cli;
 use crate::meeting::inside;
@@ -394,13 +393,12 @@ pub async fn reveal_in_finder(path: String) -> Result<(), Problem> {
 }
 
 pub async fn reveal(target: &Path) -> Result<(), Problem> {
-    Command::new("/usr/bin/open")
-        .arg("-R")
-        .arg(target)
-        .status()
-        .await
-        .map_err(|error| Problem::new(ProblemKind::CliFailed, format!("No pude mostrarlo en Finder: {error}")))
-        .map(|_| ())
+    crate::platform::reveal(target).map_err(|error| {
+        Problem::new(
+            ProblemKind::CliFailed,
+            format!("No pude mostrarlo en {}: {error}", crate::platform::file_manager_name()),
+        )
+    })
 }
 
 #[cfg(test)]

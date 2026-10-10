@@ -14,6 +14,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::model::{CliError, Envelope, Problem, ProblemKind, SUPPORTED_SCHEMA};
+use crate::platform;
 
 const CLI_OVERRIDE_ENV: &str = "BITA_CLI";
 const DB_OVERRIDE_ENV: &str = "BITA_DB_PATH";
@@ -64,7 +65,7 @@ impl Cli {
                 ProblemKind::NodeMissing,
                 format!("No encuentro Node {} o superior.", node::MIN_MAJOR),
             )
-            .with_hint(Some("brew install node".into()))
+            .with_hint(Some(platform::node_install_hint().into()))
         })?;
 
         let (entry, source) = resolve_entry(app).ok_or_else(|| {
@@ -74,20 +75,14 @@ impl Cli {
             )
         })?;
 
-        let node_dir = node
-            .parent()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/usr/bin"));
+        let path_env = platform::search_path(node.parent().map(PathBuf::from));
 
         Ok(Self {
             node,
             entry,
             source,
             db_path: database_path(),
-            path_env: OsString::from(format!(
-                "{}:/usr/bin:/bin:/usr/sbin:/sbin",
-                node_dir.display()
-            )),
+            path_env,
         })
     }
 
@@ -160,14 +155,15 @@ impl Cli {
     ) -> Result<(Option<T>, serde_json::Value), Problem> {
         let limit = options.timeout.unwrap_or(CALL_TIMEOUT);
         let mut command = Command::new(&self.node);
-        command
+        platform::quiet(&mut command)
             .arg(&self.entry)
             .args(args)
             .arg("--json")
             .arg("--db-path")
             .arg(&self.db_path)
-            .current_dir("/")
+            .current_dir(platform::neutral_dir())
             .env_clear()
+            .envs(platform::essential_env())
             .env("PATH", &self.path_env)
             .env("NO_COLOR", "1")
             .env("TERM", "dumb")
@@ -180,7 +176,7 @@ impl Cli {
             command.arg("--docs-dir").arg(docs);
         }
 
-        if let Some(home) = env::var_os("HOME") {
+        if let Some(home) = node::home() {
             command.env("HOME", home);
         }
         for (key, value) in node::identity() {
@@ -307,8 +303,7 @@ fn bin_directories() -> Vec<PathBuf> {
         directories.push(home.join("bin"));
     }
 
-    directories.push(PathBuf::from("/opt/homebrew/bin"));
-    directories.push(PathBuf::from("/usr/local/bin"));
+    directories.extend(platform::package_manager_dirs());
     directories
 }
 
@@ -347,10 +342,10 @@ fn shim_targets(text: &str) -> Vec<&str> {
 }
 
 pub fn version_of(node: &Path, entry: &Path) -> Option<String> {
-    let output = std::process::Command::new(node)
+    let output = platform::quiet_std(&mut std::process::Command::new(node))
         .arg(entry)
         .arg("--version")
-        .current_dir("/")
+        .current_dir(platform::neutral_dir())
         .stdin(Stdio::null())
         .output()
         .ok()?;
@@ -371,7 +366,7 @@ pub fn docs_root() -> PathBuf {
     let database = database_path();
     match database.parent() {
         Some(parent) => parent.join("docs"),
-        None => PathBuf::from("/tmp").join("docs"),
+        None => env::temp_dir().join("docs"),
     }
 }
 
@@ -387,7 +382,7 @@ pub fn database_path() -> PathBuf {
     let data_home = env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| node::home().map(|home| home.join(".local/share")))
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
+        .unwrap_or_else(env::temp_dir);
 
     data_home.join("bita").join("bita.db")
 }
@@ -437,6 +432,7 @@ fi
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(unix)]
     #[test]
     fn keeps_a_node_script_or_a_symlink_to_one() {
         let root = scratch("node");

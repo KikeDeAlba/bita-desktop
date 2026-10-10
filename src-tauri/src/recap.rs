@@ -9,11 +9,11 @@ use tokio::time::timeout;
 
 use crate::cli::node;
 use crate::model::{Problem, ProblemKind};
+use crate::platform;
 
 const RECAP_OVERRIDE_ENV: &str = "RECAP_CLI";
 const PASSTHROUGH_ENV: [&str; 5] = ["RECAP_ROOT", "RECAP_STATE_DIR", "RECAP_CONFIG_PATH", "RECAP_DATA_DIR", "XDG_STATE_HOME"];
 pub const NOT_FOUND: &str = "MEETING_NOT_FOUND";
-const BASE_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
 
 #[derive(Debug, Deserialize)]
 struct Envelope {
@@ -94,7 +94,7 @@ pub fn recap_binary() -> Option<PathBuf> {
 pub async fn recap_call(args: &[&str], limit: Duration) -> Result<Value, RecapError> {
     let recap = recap_binary().ok_or(RecapError::Missing)?;
 
-    let mut command = recap_command(&recap, BASE_PATH);
+    let mut command = recap_command(&recap, platform::base_path());
     command.args(args).arg("--json");
 
     let output = timeout(limit, command.output())
@@ -112,11 +112,12 @@ pub async fn recap_call(args: &[&str], limit: Duration) -> Result<Value, RecapEr
     parse(&String::from_utf8_lossy(&output.stdout), &String::from_utf8_lossy(&output.stderr))
 }
 
-pub fn recap_command(recap: &std::path::Path, path: &str) -> Command {
+pub fn recap_command(recap: &std::path::Path, path: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = Command::new(recap);
-    command
-        .current_dir("/")
+    platform::quiet(&mut command)
+        .current_dir(platform::neutral_dir())
         .env_clear()
+        .envs(platform::essential_env())
         .env("PATH", path)
         .stdin(Stdio::null())
         .kill_on_drop(true);
@@ -134,16 +135,14 @@ pub fn recap_command(recap: &std::path::Path, path: &str) -> Command {
     command
 }
 
-pub fn assistant_path() -> String {
-    let mut parts: Vec<String> = Vec::new();
+pub fn assistant_path() -> std::ffi::OsString {
+    let mut parts: Vec<PathBuf> = Vec::new();
     if let Some(home) = node::home() {
-        parts.push(home.join(".local/bin").display().to_string());
-        parts.push(home.join(".claude/local").display().to_string());
+        parts.push(home.join(".local").join("bin"));
+        parts.push(home.join(".claude").join("local"));
     }
-    parts.push("/opt/homebrew/bin".into());
-    parts.push("/usr/local/bin".into());
-    parts.push(BASE_PATH.into());
-    parts.join(":")
+    parts.extend(platform::package_manager_dirs());
+    platform::search_path(parts)
 }
 
 pub(crate) fn parse(stdout: &str, stderr: &str) -> Result<Value, RecapError> {

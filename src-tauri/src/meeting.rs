@@ -3,7 +3,6 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
-use tokio::process::Command;
 
 use crate::model::{Problem, ProblemKind};
 use crate::notes_cmd::base64;
@@ -230,12 +229,8 @@ pub async fn open_meeting_folder(dir: String) -> Result<(), Problem> {
             format!("{dir} no es la carpeta de una reunión de recap."),
         ));
     }
-    Command::new("/usr/bin/open")
-        .arg(&path)
-        .status()
-        .await
+    crate::platform::open_path(&path)
         .map_err(|error| Problem::new(ProblemKind::CliFailed, format!("No pude abrir la carpeta: {error}")))
-        .map(|_| ())
 }
 
 #[cfg(test)]
