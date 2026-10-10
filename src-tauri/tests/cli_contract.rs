@@ -167,11 +167,23 @@ fn bita_lists_the_entries_the_hoy_tab_groups() {
                 entry,
                 &[
                     "id", "description", "projectId", "projectName", "start", "stop", "startLocal", "localDay",
-                    "durationSeconds", "durationHuman", "registered", "running",
+                    "durationSeconds", "durationHuman", "running",
                 ],
                 "entries",
             );
         }
+    }
+}
+
+#[test]
+fn bita_lists_the_projects_the_app_reads() {
+    let Some(sandbox) = Sandbox::new(&["bita"], "projects") else { return };
+    let added = sandbox.run("bita", &["project", "add", "Contrato"]);
+    assert_eq!(added["ok"].as_bool(), Some(true), "{added}");
+    let listed = sandbox.run("bita", &["projects"]);
+    assert_eq!(listed["ok"].as_bool(), Some(true), "{listed}");
+    for project in listed["data"].as_array().expect("projects") {
+        has_fields(project, &["id", "name", "active", "clientName"], "projects");
     }
 }
 

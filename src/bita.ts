@@ -63,9 +63,23 @@ export interface Project {
   id: number
   name: string
   active: boolean
+  key?: string | null
   clientName: string | null
-  jiraProjectKey: string | null
-  jira: boolean
+  jiraProjectKey?: string | null
+  jira?: boolean | null
+}
+
+export interface JiraProject {
+  projectId: number
+  jiraProjectKey: string
+}
+
+export function jiraProjects(): Promise<JiraProject[]> {
+  return invoke<JiraProject[]>('jira_projects')
+}
+
+export function jiraKeyMap(list: JiraProject[]): Map<number, string> {
+  return new Map(list.map((row) => [row.projectId, row.jiraProjectKey]))
 }
 
 export function snapshot(): Promise<Snapshot> {
@@ -359,8 +373,8 @@ export interface NoteRow {
   durationSeconds: number
   durationHuman: string
   running: boolean
-  registered: boolean
-  issueKey: string | null
+  registered?: boolean
+  issueKey?: string | null
   doc: DocSummary | null
 }
 
@@ -878,8 +892,8 @@ export interface PageEntryRow {
   durationSeconds: number
   durationHuman: string
   running: boolean
-  registered: boolean
-  issueKey: string | null
+  registered?: boolean
+  issueKey?: string | null
 }
 
 export interface PageDoc {

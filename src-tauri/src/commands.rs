@@ -25,11 +25,27 @@ pub struct Project {
     pub name: String,
     pub active: bool,
     #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
     pub client_name: Option<String>,
     #[serde(default)]
     pub jira_project_key: Option<String>,
-    #[serde(default = "crate::model::goes_to_jira")]
-    pub jira: bool,
+    #[serde(default)]
+    pub jira: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraProject {
+    pub project_id: i64,
+    pub jira_project_key: String,
+}
+
+pub fn jira_projects_of(rows: Vec<serde_json::Value>) -> Vec<JiraProject> {
+    rows.into_iter()
+        .filter_map(|row| serde_json::from_value::<JiraProject>(row).ok())
+        .filter(|row| !row.jira_project_key.trim().is_empty())
+        .collect()
 }
 
 #[tauri::command]
@@ -170,6 +186,17 @@ pub async fn pending() -> Result<SummaryView, Problem> {
 }
 
 #[tauri::command]
+pub async fn jira_projects() -> Result<Vec<JiraProject>, Problem> {
+    let status = crate::registry::global().status().await;
+    if !status.modules.jira {
+        return Ok(Vec::new());
+    }
+    let cli = Cli::for_tool(Tool::Tally).await?;
+    let rows: Vec<serde_json::Value> = cli.call(&["map", "list"]).await?;
+    Ok(jira_projects_of(rows))
+}
+
+#[tauri::command]
 pub async fn scopes(app: AppHandle) -> Result<Vec<Scope>, Problem> {
     let cli = app.state::<AppState>().require_cli(&app).await?;
     cli.call(&["scope", "list"]).await
@@ -242,9 +269,40 @@ pub fn quit(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::summary_view;
+    use super::{jira_projects_of, summary_view, JiraProject, Project};
     use crate::model::SummaryData;
     use serde_json::json;
+
+    const BITA_1_PROJECTS: &str = r#"{"schemaVersion":3,"ok":true,"command":"projects","generatedAt":"2026-10-10T23:00:32.532Z","data":[{"id":1,"key":"CON","name":"Contrato","clientName":"Acme","active":true}]}"#;
+    const BITA_018_PROJECTS: &str = r#"{"schemaVersion":3,"ok":true,"command":"projects","data":[{"id":7,"name":"CoDi","active":true,"clientName":null,"jiraProjectKey":"COD","jira":false}]}"#;
+
+    #[test]
+    fn projects_from_bita_1_and_0_18_both_parse() {
+        let envelope: crate::model::Envelope<Vec<Project>> = serde_json::from_str(BITA_1_PROJECTS).expect("bita 1.0");
+        let project = &envelope.data.expect("data")[0];
+        assert_eq!(project.key.as_deref(), Some("CON"));
+        assert_eq!(project.client_name.as_deref(), Some("Acme"));
+        assert!(project.jira_project_key.is_none() && project.jira.is_none());
+
+        let envelope: crate::model::Envelope<Vec<Project>> = serde_json::from_str(BITA_018_PROJECTS).expect("bita 0.18");
+        let project = &envelope.data.expect("data")[0];
+        assert_eq!(project.jira, Some(false));
+        assert_eq!(project.jira_project_key.as_deref(), Some("COD"));
+        assert!(project.key.is_none());
+    }
+
+    #[test]
+    fn jira_projects_come_from_the_tally_map() {
+        let rows = vec![
+            json!({"projectId": 1, "projectName": "Contrato", "jiraProjectKey": "CON", "epicMode": "fixed"}),
+            json!({"projectId": 2, "projectName": "Roto"}),
+            json!({"projectId": 3, "jiraProjectKey": " "}),
+        ];
+        assert_eq!(
+            jira_projects_of(rows),
+            vec![JiraProject { project_id: 1, jira_project_key: "CON".into() }]
+        );
+    }
 
     #[test]
     fn a_tally_summary_becomes_the_jira_tab() {

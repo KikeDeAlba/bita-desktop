@@ -60,6 +60,7 @@ fn main() {
             commands::refresh,
             commands::cli_info,
             commands::projects,
+            commands::jira_projects,
             commands::start_timer,
             commands::stop_timer,
             commands::discard_timer,
