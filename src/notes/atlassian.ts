@@ -109,7 +109,7 @@ function build(current: AtlassianContext): HTMLElement {
     element(
       'p',
       'ac-lede',
-      'El MCP de Atlassian sigue siendo la vía predeterminada, pero solo se conecta a una organización a la vez. Aquí guardas varias para que bita CLI hable con cada Jira y Confluence en paralelo; cada espacio elige cuál usar.',
+      'El MCP de Atlassian sigue siendo la vía predeterminada, pero solo se conecta a una organización a la vez. Aquí guardas varias para que atl hable con cada Jira y Confluence en paralelo; cada espacio elige cuál usar.',
     ),
   )
   list.append(intro)
@@ -235,7 +235,7 @@ function addForm(): HTMLElement {
   aside.append(submit)
   if (addFailure !== null) aside.append(problemLine(addFailure))
   const terminal = element('div', 'ac-terminal')
-  terminal.append(element('span', 'v2-kbd', 'Desde la terminal'), element('code', 'ac-code', 'bita atlassian site add --site empresa'))
+  terminal.append(element('span', 'v2-kbd', 'Desde la terminal'), element('code', 'ac-code', 'atl site add empresa --email tu@empresa.com'))
   aside.append(terminal)
   return aside
 }
@@ -303,7 +303,7 @@ async function removeSite(site: AtlassianSite): Promise<void> {
   const used = site.projects.length > 0 ? ` La usan ${site.projects.join(', ')}; esos espacios se quedan sin sitio.` : ''
   const ok = await confirmDialog({
     title: `¿Quitar ${hostName(site.site)}?`,
-    body: `Se borra el token de ${keychainShort} y bita CLI deja de hablar con esa organización.${used}`,
+    body: `Se borra el token de ${keychainShort} y atl deja de hablar con esa organización.${used}`,
     confirm: 'Quitar',
     danger: true,
   })

@@ -6,7 +6,7 @@ use crate::cli::{CallOptions, Cli};
 use crate::docs::Feature;
 use crate::model::{Problem, ProblemKind};
 use crate::notes_cmd::payload_with;
-use crate::registry::{DocsProvider, Tool};
+use crate::registry::Tool;
 
 pub const SYNCED_EVENT: &str = "bita://confluence-synced";
 
@@ -19,8 +19,6 @@ pub struct AtlassianSettings {
     #[serde(default)]
     pub site: Option<String>,
     #[serde(default)]
-    pub via: Option<String>,
-    #[serde(default)]
     pub confluence: Option<String>,
     #[serde(default)]
     pub pull: Option<bool>,
@@ -28,26 +26,13 @@ pub struct AtlassianSettings {
     pub push: Option<bool>,
 }
 
-async fn data(app: &AppHandle, args: &[&str], options: CallOptions) -> Result<Value, Problem> {
-    payload_with(app, args, options).await.map(|payload| payload.data)
+async fn sync_data(args: &[&str], options: CallOptions) -> Result<Value, Problem> {
+    payload_with(Feature::ConfluenceSync, args, options).await.map(|payload| payload.data)
 }
 
-async fn sync_data(app: &AppHandle, args: &[&str], options: CallOptions) -> Result<Value, Problem> {
-    crate::docs::require(Feature::ConfluenceSync).await?;
-    data(app, args, options).await
-}
-
-enum Sites {
-    Atl(Cli),
-    Bita(Cli),
-}
-
-async fn sites_client() -> Result<Sites, Problem> {
-    let status = crate::docs::require(Feature::Atlassian).await?;
-    if status.tool(Tool::Atl).is_some_and(|found| found.ready()) {
-        return Ok(Sites::Atl(Cli::for_tool(Tool::Atl).await?));
-    }
-    Ok(Sites::Bita(Cli::for_tool(Tool::Bita).await?))
+async fn sites_client() -> Result<Cli, Problem> {
+    crate::docs::require(Feature::Atlassian).await?;
+    Cli::for_tool(Tool::Atl).await
 }
 
 async fn raw(cli: &Cli, args: &[&str], options: CallOptions) -> Result<Value, Problem> {
@@ -134,29 +119,14 @@ pub(crate) fn as_list(value: Value) -> Vec<Value> {
 
 #[tauri::command]
 pub async fn atlassian_sites(check: bool) -> Result<Vec<Value>, Problem> {
-    match sites_client().await? {
-        Sites::Bita(cli) => {
-            let mut args = vec!["atlassian", "site", "ls"];
-            if check {
-                args.push("--check");
-            }
-            let options = if check { CallOptions::timeout(60) } else { quick() };
-            raw(&cli, &args, options).await.map(as_list)
-        }
-        Sites::Atl(cli) => {
-            let sites = as_list(raw(&cli, &["site", "ls"], quick()).await?);
-            let mut views = Vec::with_capacity(sites.len());
-            for site in &sites {
-                let checked = if check { atl_check(&cli, site).await } else { None };
-                views.push(atl_site_view(site, checked.as_ref()));
-            }
-            Ok(views)
-        }
+    let cli = sites_client().await?;
+    let sites = as_list(raw(&cli, &["site", "ls"], quick()).await?);
+    let mut views = Vec::with_capacity(sites.len());
+    for site in &sites {
+        let checked = if check { atl_check(&cli, site).await } else { None };
+        views.push(atl_site_view(site, checked.as_ref()));
     }
-}
-
-pub(crate) fn add_site_args<'a>(site: &'a str, email: &'a str) -> Vec<&'a str> {
-    vec!["atlassian", "site", "add", "--site", site, "--email", email, "--token-stdin"]
+    Ok(views)
 }
 
 #[tauri::command]
@@ -175,14 +145,10 @@ pub async fn atlassian_site_add(
         return Err(Problem::new(ProblemKind::CliFailed, "Falta el token de la API."));
     }
     let options = CallOptions::timeout(60).with_stdin(token);
-    match sites_client().await? {
-        Sites::Bita(cli) => raw(&cli, &add_site_args(site, email), options).await,
-        Sites::Atl(cli) => {
-            let added = raw(&cli, &atl_add_site_args(site, email), options).await?;
-            let saved = added.get("site").cloned().unwrap_or(Value::Null);
-            Ok(atl_site_view(&saved, added.get("check")))
-        }
-    }
+    let cli = sites_client().await?;
+    let added = raw(&cli, &atl_add_site_args(site, email), options).await?;
+    let saved = added.get("site").cloned().unwrap_or(Value::Null);
+    Ok(atl_site_view(&saved, added.get("check")))
 }
 
 pub(crate) fn atl_add_site_args<'a>(site: &'a str, email: &'a str) -> Vec<&'a str> {
@@ -192,47 +158,35 @@ pub(crate) fn atl_add_site_args<'a>(site: &'a str, email: &'a str) -> Vec<&'a st
 #[tauri::command]
 pub async fn atlassian_site_test(site: String) -> Result<Value, Problem> {
     let site = site_arg(&site)?;
-    match sites_client().await? {
-        Sites::Bita(cli) => raw(&cli, &["atlassian", "site", "test", site], CallOptions::timeout(60)).await,
-        Sites::Atl(cli) => {
-            let sites = as_list(raw(&cli, &["site", "ls"], quick()).await?);
-            let found = sites
-                .into_iter()
-                .find(|entry| same_site(entry, site))
-                .ok_or_else(|| Problem::new(ProblemKind::CliFailed, format!("atl no conoce el sitio {site}.")))?;
-            let checked = atl_check(&cli, &found).await;
-            Ok(atl_site_view(&found, checked.as_ref()))
-        }
-    }
+    let cli = sites_client().await?;
+    let sites = as_list(raw(&cli, &["site", "ls"], quick()).await?);
+    let found = sites
+        .into_iter()
+        .find(|entry| same_site(entry, site))
+        .ok_or_else(|| Problem::new(ProblemKind::CliFailed, format!("atl no conoce el sitio {site}.")))?;
+    let checked = atl_check(&cli, &found).await;
+    Ok(atl_site_view(&found, checked.as_ref()))
 }
 
 #[tauri::command]
 pub async fn atlassian_site_remove(site: String) -> Result<(), Problem> {
     let site = site_arg(&site)?;
-    match sites_client().await? {
-        Sites::Bita(cli) => raw(&cli, &["atlassian", "site", "rm", site], quick()).await.map(|_| ()),
-        Sites::Atl(cli) => {
-            let sites = as_list(raw(&cli, &["site", "ls"], quick()).await?);
-            let name = sites
-                .iter()
-                .find(|entry| same_site(entry, site))
-                .and_then(|entry| entry.get("name").and_then(Value::as_str))
-                .unwrap_or(site)
-                .to_string();
-            raw(&cli, &["site", "rm", &name], quick()).await.map(|_| ())
-        }
-    }
+    let cli = sites_client().await?;
+    let sites = as_list(raw(&cli, &["site", "ls"], quick()).await?);
+    let name = sites
+        .iter()
+        .find(|entry| same_site(entry, site))
+        .and_then(|entry| entry.get("name").and_then(Value::as_str))
+        .unwrap_or(site)
+        .to_string();
+    raw(&cli, &["site", "rm", &name], quick()).await.map(|_| ())
 }
 
-pub(crate) fn project_args(project: &str, settings: &AtlassianSettings) -> Vec<String> {
-    let mut args: Vec<String> = vec!["project".into(), "atlassian".into(), project.into()];
+pub(crate) fn space_args(project: &str, settings: &AtlassianSettings) -> Vec<String> {
+    let mut args: Vec<String> = vec!["space".into(), "set".into(), project.into()];
     if let Some(site) = settings.site.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
         args.push("--site".into());
         args.push(site.into());
-    }
-    if let Some(via) = settings.via.as_deref().filter(|value| matches!(*value, "mcp" | "cli")) {
-        args.push("--via".into());
-        args.push(via.into());
     }
     if let Some(reference) = settings.confluence.as_deref() {
         let reference = reference.trim();
@@ -257,21 +211,13 @@ pub async fn project_atlassian(
     settings: AtlassianSettings,
 ) -> Result<Value, Problem> {
     let project = site_arg(&project)?.to_string();
-    let status = crate::registry::global().status().await;
-    let (cli, args) = match status.docs {
-        Some(DocsProvider::Inkwell) => (Cli::for_tool(Tool::Inkwell).await?, space_args(&project, &settings)),
-        _ => (Cli::for_tool(Tool::Bita).await?, project_args(&project, &settings)),
-    };
+    crate::docs::require(Feature::Notes).await?;
+    let cli = Cli::for_tool(Tool::Inkwell).await?;
+    let args = space_args(&project, &settings);
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let value = raw(&cli, &refs, quick()).await?;
     crate::notes::mark_stale(&app);
     Ok(value.get("atlassian").cloned().unwrap_or(value))
-}
-
-pub(crate) fn space_args(project: &str, settings: &AtlassianSettings) -> Vec<String> {
-    let mut args = project_args(project, settings);
-    args.splice(0..2, ["space".to_string(), "set".to_string()]);
-    args
 }
 
 pub(crate) fn sync_args(project: Option<&str>) -> Vec<&str> {
@@ -282,7 +228,7 @@ pub(crate) fn sync_args(project: Option<&str>) -> Vec<&str> {
 }
 
 pub async fn run_sync(app: &AppHandle, project: Option<&str>) -> Result<Vec<Value>, Problem> {
-    let value = sync_data(app, &sync_args(project), CallOptions::timeout(SYNC_SECONDS)).await?;
+    let value = sync_data(&sync_args(project), CallOptions::timeout(SYNC_SECONDS)).await?;
     crate::notes::mark_stale(app);
     let _ = app.emit(SYNCED_EVENT, ());
     Ok(as_list(value))
@@ -294,9 +240,9 @@ pub async fn confluence_sync(app: AppHandle, project: Option<String>) -> Result<
 }
 
 #[tauri::command]
-pub async fn confluence_sync_status(app: AppHandle, project: String) -> Result<Vec<Value>, Problem> {
+pub async fn confluence_sync_status(project: String) -> Result<Vec<Value>, Problem> {
     let project = site_arg(&project)?.to_string();
-    sync_data(&app, &["confluence", "sync", "status", &project], CallOptions::timeout(60))
+    sync_data(&["confluence", "status", &project], CallOptions::timeout(60))
         .await
         .map(as_list)
 }
@@ -315,7 +261,6 @@ pub async fn confluence_resolve(app: AppHandle, page_id: i64, keep: String) -> R
     };
     let id = page_id.to_string();
     sync_data(
-        &app,
         &["confluence", "conflict", "resolve", &id, "--keep", keep],
         CallOptions::timeout(SYNC_SECONDS),
     )
@@ -326,7 +271,7 @@ pub async fn confluence_resolve(app: AppHandle, page_id: i64, keep: String) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{add_site_args, as_list, atl_add_site_args, atl_site_view, on_off, project_args, same_site, space_args, sync_args, AtlassianSettings};
+    use super::{as_list, atl_add_site_args, atl_site_view, on_off, same_site, space_args, sync_args, AtlassianSettings};
     use serde_json::json;
 
     #[test]
@@ -339,29 +284,18 @@ mod tests {
     fn only_the_settings_given_reach_the_cli() {
         let settings = AtlassianSettings {
             site: Some("https://acme.atlassian.net".into()),
-            via: Some("cli".into()),
             confluence: Some(String::new()),
             pull: Some(true),
             push: Some(false),
         };
         assert_eq!(
-            project_args("codi", &settings),
+            space_args("codi", &settings),
             vec![
-                "project", "atlassian", "codi", "--site", "https://acme.atlassian.net", "--via", "cli",
+                "space", "set", "codi", "--site", "https://acme.atlassian.net",
                 "--confluence", "none", "--pull", "on", "--push", "off"
             ]
         );
-        assert_eq!(project_args("codi", &AtlassianSettings::default()), vec!["project", "atlassian", "codi"]);
-        let odd = AtlassianSettings { via: Some("smoke".into()), ..AtlassianSettings::default() };
-        assert_eq!(project_args("codi", &odd), vec!["project", "atlassian", "codi"]);
-    }
-
-    #[test]
-    fn the_token_never_travels_in_the_arguments() {
-        let args = add_site_args("https://acme.atlassian.net", "me@acme.com");
-        assert!(args.contains(&"--token-stdin"));
-        assert!(!args.iter().any(|arg| arg.contains("secret")));
-        assert_eq!(args.len(), 8);
+        assert_eq!(space_args("codi", &AtlassianSettings::default()), vec!["space", "set", "codi"]);
     }
 
     #[test]
@@ -379,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn an_atl_site_reads_like_a_bita_site() {
+    fn an_atl_site_becomes_the_view_the_window_draws() {
         let site = json!({"name": "acme", "url": "https://acme.atlassian.net", "email": "me@acme.com", "default": true});
         let unchecked = atl_site_view(&site, None);
         assert_eq!(unchecked["site"], "https://acme.atlassian.net");
@@ -402,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn atl_receives_the_token_on_stdin_too() {
+    fn atl_receives_the_token_on_stdin() {
         let args = atl_add_site_args("https://acme.atlassian.net", "me@acme.com");
         assert_eq!(args, vec!["site", "add", "https://acme.atlassian.net", "--email", "me@acme.com", "--token-stdin"]);
     }

@@ -27,6 +27,8 @@ import {
   openExternal,
   pageDocument,
   projects,
+  jiraProjects,
+  jiraKeyMap,
   recapList,
   searchTranscripts,
   type MeetingFocus,
@@ -1162,9 +1164,7 @@ async function loadClients(): Promise<void> {
   try {
     const list = await projects()
     clients = new Map(list.filter((project) => project.clientName !== null).map((project) => [project.id, project.clientName as string]))
-    jiraKeys = new Map(
-      list.filter((project) => project.jiraProjectKey !== null).map((project) => [project.id, project.jiraProjectKey as string]),
-    )
+    jiraKeys = can('jira') ? jiraKeyMap(await jiraProjects().catch(() => [])) : new Map<number, string>()
     paint()
   } catch {
     return

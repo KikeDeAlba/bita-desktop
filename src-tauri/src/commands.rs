@@ -2,9 +2,12 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
+use crate::cli::Cli;
+use crate::docs::Feature;
 use crate::doctor::{self, Report};
-use crate::registry::Origin;
-use crate::model::{Problem, ProblemKind, Scope, SummaryData, SummaryMeta, SummaryView, Snapshot};
+use crate::worked::{self, WorkedView};
+use crate::model::{Entry, Problem, ProblemKind, Scope, SummaryData, SummaryMeta, SummaryView, Snapshot};
+use crate::registry::{Origin, Tool};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -22,11 +25,27 @@ pub struct Project {
     pub name: String,
     pub active: bool,
     #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
     pub client_name: Option<String>,
     #[serde(default)]
     pub jira_project_key: Option<String>,
-    #[serde(default = "crate::model::goes_to_jira")]
-    pub jira: bool,
+    #[serde(default)]
+    pub jira: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JiraProject {
+    pub project_id: i64,
+    pub jira_project_key: String,
+}
+
+pub fn jira_projects_of(rows: Vec<serde_json::Value>) -> Vec<JiraProject> {
+    rows.into_iter()
+        .filter_map(|row| serde_json::from_value::<JiraProject>(row).ok())
+        .filter(|row| !row.jira_project_key.trim().is_empty())
+        .collect()
 }
 
 #[tauri::command]
@@ -125,9 +144,7 @@ async fn act(app: AppHandle, args: Vec<String>) -> Result<Snapshot, Problem> {
     Ok(state.snapshot(Utc::now()))
 }
 
-async fn summary_view(app: &AppHandle, args: &[&str]) -> Result<SummaryView, Problem> {
-    let cli = app.state::<AppState>().require_cli(app).await?;
-    let (data, meta) = cli.call_with_meta::<SummaryData>(args).await?;
+pub fn summary_view(data: SummaryData, meta: serde_json::Value) -> SummaryView {
     let meta: SummaryMeta = serde_json::from_value(meta).unwrap_or_default();
     let estimate_seconds = data
         .groups
@@ -136,7 +153,7 @@ async fn summary_view(app: &AppHandle, args: &[&str]) -> Result<SummaryView, Pro
         .map(|group| group.estimate_seconds)
         .sum();
 
-    Ok(SummaryView {
+    SummaryView {
         total_seconds: data.total_seconds,
         total_human: data.total_human,
         jira_seconds: data.jira_seconds.unwrap_or(data.total_seconds),
@@ -146,21 +163,37 @@ async fn summary_view(app: &AppHandle, args: &[&str]) -> Result<SummaryView, Pro
         groups: data.groups,
         overlaps: meta.overlaps,
         excluded: meta.excluded,
-    })
+    }
 }
 
 #[tauri::command]
-pub async fn worked(app: AppHandle, range: String) -> Result<SummaryView, Problem> {
+pub async fn worked(app: AppHandle, range: String) -> Result<WorkedView, Problem> {
     let range = match range.as_str() {
         "week" => "week",
         _ => "today",
     };
-    summary_view(&app, &["summary", range, "--include-running"]).await
+    let cli = app.state::<AppState>().require_cli(&app).await?;
+    let entries: Vec<Entry> = cli.call(&["entries", range]).await?;
+    Ok(worked::group(&entries, Utc::now()))
 }
 
 #[tauri::command]
-pub async fn pending(app: AppHandle) -> Result<SummaryView, Problem> {
-    summary_view(&app, &["summary", "--pending"]).await
+pub async fn pending() -> Result<SummaryView, Problem> {
+    crate::docs::require(Feature::Jira).await?;
+    let cli = Cli::for_tool(Tool::Tally).await?;
+    let (data, meta) = cli.call_with_meta::<SummaryData>(&["summary", "--pending"]).await?;
+    Ok(summary_view(data, meta))
+}
+
+#[tauri::command]
+pub async fn jira_projects() -> Result<Vec<JiraProject>, Problem> {
+    let status = crate::registry::global().status().await;
+    if !status.modules.jira {
+        return Ok(Vec::new());
+    }
+    let cli = Cli::for_tool(Tool::Tally).await?;
+    let rows: Vec<serde_json::Value> = cli.call(&["map", "list"]).await?;
+    Ok(jira_projects_of(rows))
 }
 
 #[tauri::command]
@@ -232,4 +265,77 @@ pub fn notes_take_meeting(app: AppHandle) -> Option<crate::notes::MeetingFocus> 
 #[tauri::command]
 pub fn quit(app: AppHandle) {
     app.exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{jira_projects_of, summary_view, JiraProject, Project};
+    use crate::model::SummaryData;
+    use serde_json::json;
+
+    const BITA_1_PROJECTS: &str = r#"{"schemaVersion":3,"ok":true,"command":"projects","generatedAt":"2026-10-10T23:00:32.532Z","data":[{"id":1,"key":"CON","name":"Contrato","clientName":"Acme","active":true}]}"#;
+    const BITA_018_PROJECTS: &str = r#"{"schemaVersion":3,"ok":true,"command":"projects","data":[{"id":7,"name":"CoDi","active":true,"clientName":null,"jiraProjectKey":"COD","jira":false}]}"#;
+
+    #[test]
+    fn projects_from_bita_1_and_0_18_both_parse() {
+        let envelope: crate::model::Envelope<Vec<Project>> = serde_json::from_str(BITA_1_PROJECTS).expect("bita 1.0");
+        let project = &envelope.data.expect("data")[0];
+        assert_eq!(project.key.as_deref(), Some("CON"));
+        assert_eq!(project.client_name.as_deref(), Some("Acme"));
+        assert!(project.jira_project_key.is_none() && project.jira.is_none());
+
+        let envelope: crate::model::Envelope<Vec<Project>> = serde_json::from_str(BITA_018_PROJECTS).expect("bita 0.18");
+        let project = &envelope.data.expect("data")[0];
+        assert_eq!(project.jira, Some(false));
+        assert_eq!(project.jira_project_key.as_deref(), Some("COD"));
+        assert!(project.key.is_none());
+    }
+
+    #[test]
+    fn jira_projects_come_from_the_tally_map() {
+        let rows = vec![
+            json!({"projectId": 1, "projectName": "Contrato", "jiraProjectKey": "CON", "epicMode": "fixed"}),
+            json!({"projectId": 2, "projectName": "Roto"}),
+            json!({"projectId": 3, "jiraProjectKey": " "}),
+        ];
+        assert_eq!(
+            jira_projects_of(rows),
+            vec![JiraProject { project_id: 1, jira_project_key: "CON".into() }]
+        );
+    }
+
+    #[test]
+    fn a_tally_summary_becomes_the_jira_tab() {
+        let data: SummaryData = serde_json::from_value(json!({
+            "totalSeconds": 5400,
+            "totalHuman": "1h 30m",
+            "jiraSeconds": 3600,
+            "nonJiraSeconds": 1800,
+            "groups": [
+                {"summary": "Firma BBVA", "projectId": 7, "projectName": "CoDi", "totalSeconds": 3600, "totalHuman": "1h",
+                 "estimateSeconds": 5400, "estimateHuman": "1h 30m", "entryIds": [1, 2], "days": ["2026-10-10"],
+                 "docs": [], "partIndex": 1, "partCount": 1, "jiraProjectKey": "COD", "jira": true},
+                {"summary": "Interno", "projectId": 8, "projectName": "Casa", "totalSeconds": 1800, "totalHuman": "30m",
+                 "estimateSeconds": 1800, "estimateHuman": "30m", "entryIds": [3], "days": ["2026-10-10"],
+                 "partIndex": 1, "partCount": 1, "jira": false}
+            ]
+        }))
+        .expect("tally data");
+        let meta = json!({
+            "overlaps": [],
+            "excluded": [{"id": 4, "description": "", "projectName": null, "durationHuman": "5m", "reason": "no-description"}],
+            "nonJira": {"totalSeconds": 1800, "totalHuman": "30m", "projects": [{"name": "Casa", "totalSeconds": 1800, "totalHuman": "30m"}]}
+        });
+        let view = summary_view(data, meta);
+        assert_eq!(view.estimate_seconds, 5400);
+        assert_eq!(view.jira_seconds, 3600);
+        assert_eq!(view.non_jira_seconds, 1800);
+        assert_eq!(view.excluded.len(), 1);
+        assert_eq!(view.non_jira.expect("non jira").projects.len(), 1);
+
+        let bare: SummaryData = serde_json::from_value(json!({"totalSeconds": 0, "totalHuman": "0m", "groups": []})).expect("bare");
+        let empty = summary_view(bare, serde_json::Value::Null);
+        assert_eq!(empty.jira_seconds, 0);
+        assert!(empty.groups.is_empty() && empty.excluded.is_empty());
+    }
 }

@@ -18,25 +18,24 @@ pub struct CliPayload {
     pub meta: serde_json::Value,
 }
 
-async fn payload(app: &AppHandle, args: &[&str]) -> Result<CliPayload, Problem> {
-    payload_with(app, args, cli::CallOptions::default()).await
+async fn payload(feature: Feature, args: &[&str]) -> Result<CliPayload, Problem> {
+    payload_with(feature, args, cli::CallOptions::default()).await
 }
 
 pub(crate) async fn payload_with(
-    _app: &AppHandle,
+    feature: Feature,
     args: &[&str],
     options: cli::CallOptions,
 ) -> Result<CliPayload, Problem> {
-    let (data, meta) = crate::docs::call(args, options).await.map_err(newer_database)?;
+    let (data, meta) = crate::docs::call(feature, args, options).await.map_err(newer_database)?;
     Ok(CliPayload {
         data: data.unwrap_or(serde_json::Value::Null),
         meta,
     })
 }
 
-async fn backlog_payload(app: &AppHandle, args: &[&str]) -> Result<CliPayload, Problem> {
-    crate::docs::require(Feature::Backlog).await?;
-    payload(app, args).await
+async fn backlog_payload(args: &[&str]) -> Result<CliPayload, Problem> {
+    payload(Feature::Backlog, args).await
 }
 
 fn newer_database(problem: Problem) -> Problem {
@@ -51,47 +50,45 @@ fn newer_database(problem: Problem) -> Problem {
 }
 
 #[tauri::command]
-pub async fn notes_tree(app: AppHandle) -> Result<CliPayload, Problem> {
-    payload(&app, &["docs", "tree", "--pages", "--months"]).await
+pub async fn notes_tree() -> Result<CliPayload, Problem> {
+    payload(Feature::Notes, &["tree", "--pages", "--months"]).await
 }
 
 #[tauri::command]
-pub async fn page_document(app: AppHandle, page_id: i64) -> Result<CliPayload, Problem> {
+pub async fn page_document(page_id: i64) -> Result<CliPayload, Problem> {
     let id = page_id.to_string();
-    payload(&app, &["docs", "page", "show", &id]).await
+    payload(Feature::Notes, &["page", "show", &id]).await
 }
 
 #[tauri::command]
 pub async fn notes_list(
-    app: AppHandle,
     project: Option<String>,
     limit: Option<u32>,
     offset: Option<u32>,
 ) -> Result<CliPayload, Problem> {
     let limit = limit.unwrap_or(200).to_string();
     let offset = offset.unwrap_or(0).to_string();
-    let mut args: Vec<&str> = vec!["docs", "ls", "--limit", &limit, "--offset", &offset];
+    let mut args: Vec<&str> = vec!["note", "ls", "--limit", &limit, "--offset", &offset];
     if let Some(project) = project.as_deref() {
         args.push("--project");
         args.push(project);
     }
-    payload(&app, &args).await
+    payload(Feature::EntryNotes, &args).await
 }
 
 #[tauri::command]
-pub async fn notes_today(app: AppHandle) -> Result<CliPayload, Problem> {
-    payload(&app, &["docs", "ls", "today", "--limit", "0"]).await
+pub async fn notes_today() -> Result<CliPayload, Problem> {
+    payload(Feature::EntryNotes, &["note", "ls", "today", "--limit", "0"]).await
 }
 
 #[tauri::command]
-pub async fn notes_document(app: AppHandle, entry_id: i64) -> Result<CliPayload, Problem> {
+pub async fn notes_document(entry_id: i64) -> Result<CliPayload, Problem> {
     let id = entry_id.to_string();
-    payload(&app, &["docs", "show", &id]).await
+    payload(Feature::EntryNotes, &["note", "show", &id]).await
 }
 
 #[tauri::command]
 pub async fn notes_search(
-    app: AppHandle,
     query: String,
     project: Option<String>,
 ) -> Result<CliPayload, Problem> {
@@ -103,17 +100,16 @@ pub async fn notes_search(
         ));
     }
 
-    let mut args: Vec<&str> = vec!["docs", "search", needle];
+    let mut args: Vec<&str> = vec!["note", "search", needle];
     if let Some(project) = project.as_deref() {
         args.push("--project");
         args.push(project);
     }
-    payload(&app, &args).await
+    payload(Feature::EntryNotes, &args).await
 }
 
 #[tauri::command]
 pub async fn notes_search_pages(
-    app: AppHandle,
     query: String,
     project: Option<String>,
 ) -> Result<CliPayload, Problem> {
@@ -125,11 +121,11 @@ pub async fn notes_search_pages(
         ));
     }
     let args = page_search_args(needle, project.as_deref());
-    payload(&app, &args).await
+    payload(Feature::Notes, &args).await
 }
 
 fn page_search_args<'a>(needle: &'a str, project: Option<&'a str>) -> Vec<&'a str> {
-    let mut args = vec!["docs", "search", needle, "--pages"];
+    let mut args = vec!["search", needle, "--pages"];
     if let Some(project) = project.filter(|value| !value.trim().is_empty()) {
         args.push("--project");
         args.push(project);
@@ -139,7 +135,6 @@ fn page_search_args<'a>(needle: &'a str, project: Option<&'a str>) -> Vec<&'a st
 
 #[tauri::command]
 pub async fn backlog_add(
-    app: AppHandle,
     kind: String,
     title: String,
     body: Option<String>,
@@ -153,7 +148,7 @@ pub async fn backlog_add(
     }
     let page = page_id.map(|id| id.to_string());
     let args = add_args(kind, title, body.as_deref(), page.as_deref(), project.as_deref());
-    backlog_payload(&app, &args).await
+    backlog_payload(&args).await
 }
 
 fn add_args<'a>(
@@ -179,13 +174,12 @@ fn add_args<'a>(
 }
 
 #[tauri::command]
-pub async fn backlog_list(app: AppHandle) -> Result<CliPayload, Problem> {
-    backlog_payload(&app, &["backlog", "ls", "--status", "all"]).await
+pub async fn backlog_list() -> Result<CliPayload, Problem> {
+    backlog_payload(&["backlog", "ls", "--status", "all"]).await
 }
 
 #[tauri::command]
 pub async fn backlog_set_status(
-    app: AppHandle,
     id: i64,
     status: String,
     resolution: Option<String>,
@@ -193,7 +187,7 @@ pub async fn backlog_set_status(
     let action = backlog_action(&status)?;
     let id = id.to_string();
     let args = status_args(action, &id, resolution.as_deref());
-    backlog_payload(&app, &args).await
+    backlog_payload(&args).await
 }
 
 fn status_args<'a>(action: &'a str, id: &'a str, resolution: Option<&'a str>) -> Vec<&'a str> {
@@ -208,10 +202,10 @@ fn status_args<'a>(action: &'a str, id: &'a str, resolution: Option<&'a str>) ->
 }
 
 #[tauri::command]
-pub async fn backlog_set_kind(app: AppHandle, id: i64, kind: String) -> Result<CliPayload, Problem> {
+pub async fn backlog_set_kind(id: i64, kind: String) -> Result<CliPayload, Problem> {
     let kind = backlog_kind(&kind)?;
     let id = id.to_string();
-    backlog_payload(&app, &["backlog", "edit", &id, "--kind", kind]).await
+    backlog_payload(&["backlog", "edit", &id, "--kind", kind]).await
 }
 
 fn backlog_kind(kind: &str) -> Result<&'static str, Problem> {
@@ -466,12 +460,12 @@ mod tests {
 
     #[test]
     fn a_page_search_asks_for_pages_and_scopes_only_with_a_project() {
-        assert_eq!(super::page_search_args("ssm", None), vec!["docs", "search", "ssm", "--pages"]);
+        assert_eq!(super::page_search_args("ssm", None), vec!["search", "ssm", "--pages"]);
         assert_eq!(
             super::page_search_args("ssm", Some("codi")),
-            vec!["docs", "search", "ssm", "--pages", "--project", "codi"]
+            vec!["search", "ssm", "--pages", "--project", "codi"]
         );
-        assert_eq!(super::page_search_args("ssm", Some(" ")), vec!["docs", "search", "ssm", "--pages"]);
+        assert_eq!(super::page_search_args("ssm", Some(" ")), vec!["search", "ssm", "--pages"]);
     }
 
     #[test]

@@ -1,21 +1,23 @@
 # Den
 
 **Den** (madriguera) es la app de escritorio que junta las herramientas
-`@kikedealba` en la barra de menús: el tiempo de **bita**, las páginas de
-**inkwell**, las conexiones de **atl** y las reuniones de **recap**. El icono es
-el mapache.
+`@kikedealba` en la barra de menús: los cronómetros de **bita**, las páginas y
+las notas de **inkwell**, lo pendiente de pasar a Jira de **tally**, las
+conexiones de **atl** y las reuniones de **recap**. El icono es el mapache.
 
 Den no trae ninguna de ellas dentro ni depende de su código. Las encuentra en el
 registro de `@kikedealba/kit` cuando están instaladas, les habla por su CLI con
 `--json` y enciende solo los módulos de las que responden. Si falta una, su
 parte desaparece y en Ajustes aparece una tarjeta con el comando para
-instalarla.
+instalarla. Cada módulo tiene una sola dueña: no hay respaldos de una
+herramienta a otra.
 
 | Herramienta | Qué enciende en Den |
 |---|---|
-| `bita` | Las pestañas Ahora, Hoy, Jira y Repos, y el arranque de cronómetros |
-| `inkwell` | La ventana de notas, el backlog y el historial de las páginas; si no está, se usa `bita docs` |
-| `atl` | Las conexiones con Jira y Confluence; si no está, las de `bita atlassian` |
+| `bita` | Las pestañas Ahora, Hoy y Repos, y el arranque de cronómetros |
+| `inkwell` | La ventana de notas, el backlog, el historial de las páginas, la sincronización con Confluence y las notas de cada cronómetro |
+| `tally` | La pestaña Jira: lo medido que todavía no se registró |
+| `atl` | Las conexiones con Jira y Confluence (los sitios de Atlassian) |
 | `recap` | Reuniones, el asistente en vivo, los tipos de reunión del lanzador y las grabaciones en Almacenamiento |
 
 ## Requisitos
@@ -24,10 +26,11 @@ Las herramientas que quieras usar, instaladas con su `setup`, que es el que las
 deja en el registro:
 
 ```sh
-npm i -g @kikedealba/bita && bita setup
-npm i -g @kikedealba/inkwell && inkwell setup
-npm i -g @kikedealba/atl && atl setup
-npm i -g @kikedealba/recap && recap setup
+npm install -g @kikedealba/bita && bita setup
+npm install -g @kikedealba/inkwell && inkwell setup
+npm install -g @kikedealba/tally && tally setup
+npm install -g @kikedealba/atl && atl setup
+npm install -g @kikedealba/recap && recap setup
 ```
 
 Cada manifiesto puede traer su propia pista de instalación (`install`); Den la
@@ -49,15 +52,35 @@ Ajustes con sus problemas.
 
 Al arrancar le pregunta a cada una `capabilities --json` y guarda la respuesta
 durante la sesión. Los módulos se deciden por capacidad, no por versión ni por
-el texto de un error: el backlog pide `docs.backlog` a inkwell, el historial
-`docs.history`, la sincronización `docs.confluence.sync`. Una herramienta
-registrada que no contesta queda apagada hasta que vuelva a responder.
+el texto de un error:
 
-Las páginas, el backlog y Confluence van a inkwell cuando está instalado y
-`inkwell migrate status --json` dice `migrated: true`; si no, a `bita docs …`.
-La traducción es quitar el prefijo `docs` (`bita docs page history 4` →
-`inkwell page history 4`). Las notas de cada entrada (`docs ls`, `docs show`)
-siguen con bita mientras esté instalado.
+| Módulo | Lo enciende |
+|---|---|
+| Cronómetros, Hoy, Repos | `bita` respondiendo |
+| Jira | `tally` con `timesheet.summary` |
+| Notas (páginas) | `inkwell` con `docs.page.read` |
+| Notas de cada cronómetro | `inkwell` con `docs.entry-notes` |
+| Backlog, historial, Confluence | `inkwell` con `docs.backlog`, `docs.history`, `docs.confluence.sync` |
+| Propuestas | `recap` e `inkwell` con `docs.propose` |
+| Sitios de Atlassian | `atl` respondiendo |
+| Reuniones, asistente en vivo | `recap` respondiendo |
+
+Una herramienta registrada que no contesta queda apagada hasta que vuelva a
+responder.
+
+La pestaña **Hoy** no le pide un resumen a nadie: lee `bita entries today|week
+--json` y agrupa en Den por título y proyecto (sin distinguir mayúsculas,
+espacios ni la puntuación final), con la duración de cada bloque, los que están
+corriendo incluidos, y avisa de los días con cronómetros solapados. La pestaña
+**Jira** es `tally summary --pending --json`: los grupos, la estimación y lo que
+queda fuera de Jira los decide tally, y la clave de Jira de cada proyecto (en
+Repos y en los ajustes del espacio) sale de `tally map list --json`. Den lee
+igual los proyectos y las entradas de bita 0.18 y de bita 1.0, que ya no traen
+`registered`, `issueKey` ni los datos de Jira. Las notas de cada cronómetro son
+`inkwell note ls|show|search`.
+
+Si inkwell todavía no trae los docs de bita (`inkwell migrate status --json`
+dice `migrated: false`), Ajustes lo avisa con el comando para migrarlos.
 
 El directorio `tools.d` se vigila: instalar o quitar una herramienta enciende o
 apaga sus módulos sin reiniciar. «Volver a buscar» en Ajustes fuerza la
@@ -160,24 +183,24 @@ dejando el título medio fuera. Carga el `dist` en un WKWebView de 380x520, mide
 las cajas y sale con error si alguna empieza por encima del panel o no mide lo
 que debe.
 
-**Nunca contra la base real.** `BITA_DB_PATH` apunta la app a una copia:
+**Nunca contra la base real.** `BITA_DB_PATH` apunta la app a una copia de la
+bitácora, e `INKWELL_DB_PATH` con `INKWELL_DOCS_DIR` a una de inkwell:
 
 ```sh
 cp ~/.local/share/bita/bita.db /tmp/bita-dev.db
-cp -R ~/.local/share/bita/docs /tmp/bita-dev-docs
-BITA_DB_PATH=/tmp/bita-dev.db BITA_DOCS_DIR=/tmp/bita-dev-docs pnpm tauri dev
+cp ~/.local/share/inkwell/inkwell.db /tmp/inkwell-dev.db
+cp -R ~/.local/share/inkwell/docs /tmp/inkwell-dev-docs
+BITA_DB_PATH=/tmp/bita-dev.db INKWELL_DB_PATH=/tmp/inkwell-dev.db \
+  INKWELL_DOCS_DIR=/tmp/inkwell-dev-docs pnpm tauri dev
 ```
-
-Los documentos van aparte porque la ventana de notas también lee de ahí.
 
 | Variable | Para qué |
 |---|---|
 | `KIT_REGISTRY_DIR` | Leer otro registro de herramientas, por ejemplo uno de prueba |
-| `BITA_CLI`, `INKWELL_CLI`, `ATL_CLI`, `RECAP_CLI` | Usar ese ejecutable o script en vez del registrado; un `.ts`/`.js` se corre con node |
+| `BITA_CLI`, `INKWELL_CLI`, `TALLY_CLI`, `ATL_CLI`, `RECAP_CLI` | Usar ese ejecutable o script en vez del registrado; un `.ts`/`.js` se corre con node |
 | `BITA_DB_PATH` | Usar otra base de datos |
 | `BITA_NODE` | Forzar un binario de node concreto para los scripts de las variables de arriba |
 | `INKWELL_DB_PATH`, `INKWELL_DOCS_DIR` | Usar otra base o directorio de inkwell; también los vigila Den |
-| `BITA_DOCS_DIR` | Usar otro directorio de documentos; se le pasa al CLI como `--docs-dir` |
 | `BITA_KEEP_PANEL` | Abre el panel al arrancar y evita que se esconda al perder el foco, para poder usar las devtools |
 | `BITA_NO_OPEN_NOTES` | No abre la ventana de documentación al arrancar; deja solo el icono del tray |
 | `BITA_KEEP_ACCESSORY` | No cambia la activation policy al abrir las notas: sin icono en el Dock ni barra de menús |
@@ -252,16 +275,14 @@ defecto. El control de la barra del lector, o `cmd ]` y `cmd [`, la lleva de
 lateral se redimensionan arrastrando su borde. Los tres anchos se recuerdan.
 
 **Pendientes y hallazgos** es una vista propia, fija sobre el árbol: una
-bandeja con el backlog de bita. A la izquierda, la lista con las pestañas
+bandeja con el backlog de inkwell. A la izquierda, la lista con las pestañas
 Hallazgos, Pendientes y Resueltos, un chip por proyecto para filtrar y un campo
 que filtra por título o salta a un ítem por su clave (`STI-14`). A la derecha,
 el detalle: la clave, que se copia con un clic, la línea `cierra STI-14` para
 pedírselo a Claude, una nota de cómo se resolvió y los botones para resolver,
 reabrir, convertir un hallazgo en pendiente o abrir su página
-(`bita backlog resolve|reopen|edit`). El panel lateral de cada página enseña sus
-ítems abiertos por clave, y los enlaces que se registraron para ella. Las claves
-necesitan el CLI 0.9 o posterior; con uno anterior, los ítems se nombran por su
-id.
+(`inkwell backlog resolve|reopen|edit`). El panel lateral de cada página enseña
+sus ítems abiertos por clave, y los enlaces que se registraron para ella.
 
 Se abre junto con la app, y `BITA_NO_OPEN_NOTES` lo suprime. Aun así se construye
 desde Rust en vez de declararla en `tauri.conf.json`: una ventana declarada se
@@ -338,7 +359,7 @@ documento.
 
 Los diagramas de draw.io llegan como un bloque ```` ```drawio ```` que nombra un
 `.drawio` guardado en `<página>.assets/`. La app no los dibuja: enseña el PNG
-que genera `bita docs diagrams render`, con el mismo lightbox. El PNG lo lee
+que genera `inkwell diagrams render`, con el mismo lightbox. El PNG lo lee
 Rust (`page_asset`, solo `.png` dentro de una carpeta `.assets` del directorio
 de docs, hasta 10 MB) y lo pasa como `data:` URL, así que la CSP no cambia. Sin
 render, la figura dice qué comando correr, y «Abrir en draw.io» abre el `.drawio`
@@ -370,9 +391,11 @@ src-tauri/      el backend: tray, estado, registro, subprocesos, vigilancia
 
 `src-tauri/tests/cli_contract.rs` corre contra las herramientas que haya en un
 registro de prueba, nunca contra el real: sin `KIT_REGISTRY_DIR` se saltan.
-Cada herramienta registrada tiene que contestar `capabilities --json`, y bita e
-inkwell además el contrato de datos que pinta la app, cada una con su base en
-una carpeta temporal.
+Cada herramienta registrada tiene que contestar `capabilities --json`, y bita,
+inkwell, tally y atl además el contrato de datos que pinta la app, cada una con
+su base en una carpeta temporal. La prueba de una herramienta que no está en el
+registro se salta, igual que la de las notas de cada cronómetro si el inkwell
+registrado no declara `docs.entry-notes`.
 
 ```sh
 KIT_REGISTRY_DIR=/tmp/den-registry cargo test --test cli_contract

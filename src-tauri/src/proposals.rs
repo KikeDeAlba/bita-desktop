@@ -209,8 +209,7 @@ fn ended_at(data: &Value) -> Option<String> {
 }
 
 async fn docs<T: for<'de> Deserialize<'de>>(feature: Feature, args: &[&str]) -> Result<T, Problem> {
-    crate::docs::require(feature).await?;
-    let (data, _) = crate::docs::call(args, CallOptions::default()).await?;
+    let (data, _) = crate::docs::call(feature, args, CallOptions::default()).await?;
     serde_json::from_value(data.unwrap_or(Value::Null))
         .map_err(|error| Problem::new(ProblemKind::Unreadable, format!("No entiendo la respuesta de los docs: {error}")))
 }
@@ -264,27 +263,27 @@ fn proposal_of(data: Value) -> Result<Proposal, Problem> {
 pub async fn docs_branch_diff(branch: String, sha: String) -> Result<BranchDiff, Problem> {
     let branch = valid_branch(&branch)?;
     let sha = valid_rev(&sha)?;
-    docs(Feature::History, &["docs", "branch", "diff", branch, "--commit", sha]).await
+    docs(Feature::History, &["branch", "diff", branch, "--commit", sha]).await
 }
 
 #[tauri::command]
 pub async fn page_history(page_id: i64) -> Result<PageHistory, Problem> {
     let id = page_id.to_string();
-    docs(Feature::History, &["docs", "page", "history", &id]).await
+    docs(Feature::History, &["page", "history", &id]).await
 }
 
 #[tauri::command]
 pub async fn page_diff(page_id: i64, rev: String) -> Result<PageDiff, Problem> {
     let id = page_id.to_string();
     let rev = valid_rev(&rev)?;
-    docs(Feature::History, &["docs", "page", "diff", &id, rev]).await
+    docs(Feature::History, &["page", "diff", &id, rev]).await
 }
 
 #[tauri::command]
 pub async fn page_restore(app: AppHandle, page_id: i64, sha: String) -> Result<Value, Problem> {
     let id = page_id.to_string();
     let sha = valid_rev(&sha)?;
-    let result = docs::<Value>(Feature::History, &["docs", "page", "restore", &id, sha]).await?;
+    let result = docs::<Value>(Feature::History, &["page", "restore", &id, sha]).await?;
     crate::notes::mark_stale(&app);
     Ok(result)
 }
@@ -349,7 +348,7 @@ pub async fn proposal_reject(meeting_id: String, n: i64) -> Result<Proposal, Pro
 
 #[tauri::command]
 pub async fn pending_proposals() -> Result<Vec<PendingMeeting>, Problem> {
-    let list = match docs::<BranchList>(Feature::Proposals, &["docs", "branch", "ls"]).await {
+    let list = match docs::<BranchList>(Feature::Proposals, &["branch", "ls"]).await {
         Ok(list) => list,
         Err(_) => return Ok(Vec::new()),
     };

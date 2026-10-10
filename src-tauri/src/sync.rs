@@ -5,6 +5,7 @@ use tauri::AppHandle;
 use tokio::time::{interval, sleep, MissedTickBehavior};
 
 use crate::cli::CallOptions;
+use crate::docs::Feature;
 use crate::notes_cmd::payload_with;
 
 const FIRST_RUN: Duration = Duration::from_secs(120);
@@ -17,16 +18,20 @@ pub fn spawn(app: AppHandle) {
         ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
         loop {
             ticker.tick().await;
-            if wants_sync(&app).await {
+            if wants_sync().await {
                 let _ = crate::atlassian_cmd::run_sync(&app, None).await;
             }
         }
     });
 }
 
-async fn wants_sync(app: &AppHandle) -> bool {
+async fn wants_sync() -> bool {
+    let status = crate::registry::global().status().await;
+    if crate::docs::refusal(Feature::ConfluenceSync, &status).is_some() {
+        return false;
+    }
     let options = CallOptions::timeout(30);
-    match payload_with(app, &["docs", "tree", "--pages"], options).await {
+    match payload_with(Feature::Notes, &["tree", "--pages"], options).await {
         Ok(payload) => any_space_syncs(&payload.data),
         Err(_) => false,
     }

@@ -1,4 +1,4 @@
-import type { Group, NonJira, Project, Scope, SummaryView } from './bita.ts'
+import type { Group, NonJira, Project, Scope, SummaryView, WorkedGroup, WorkedView } from './bita.ts'
 import { element } from './dom.ts'
 import { human } from './format.ts'
 
@@ -20,18 +20,37 @@ export function pairOfTotals(
   estimateSeconds: number,
   estimateLabel: string,
 ): HTMLElement {
-  const row = element('div', 'totals')
-
-  const left = element('div', 'total')
-  left.append(element('span', 'total-figure', human(workedSeconds)))
-  left.append(element('span', 'total-label', 'trabajado'))
+  const row = workedTotals(workedSeconds)
 
   const right = element('div', 'total total--estimate')
   right.append(element('span', 'total-figure', `→ ${human(estimateSeconds)}`))
   right.append(element('span', 'total-label', estimateLabel))
 
-  row.append(left, right)
+  row.append(right)
   return row
+}
+
+function workedTotals(workedSeconds: number): HTMLElement {
+  const row = element('div', 'totals')
+  const left = element('div', 'total')
+  left.append(element('span', 'total-figure', human(workedSeconds)))
+  left.append(element('span', 'total-label', 'trabajado'))
+  row.append(left)
+  return row
+}
+
+function rowMeta(projectId: number | null, projectName: string | null, entryIds: number[], days: string[], extra = ''): HTMLElement {
+  const meta = element('div', 'group-meta')
+  const dot = element('i', 'dot')
+  dot.style.background = projectColor(projectId)
+  const blocks = entryIds.length === 1 ? '1 bloque' : `${entryIds.length} bloques`
+  meta.append(dot, element('span', undefined, `${projectName ?? 'sin proyecto'} · ${blocks}${daySpan(days)}${extra}`))
+  return meta
+}
+
+function daySpan(days: string[]): string {
+  if (days.length <= 1) return ''
+  return ` · ${days[0]?.slice(5) ?? ''}–${days[days.length - 1]?.slice(5) ?? ''}`
 }
 
 function groupRow(group: Group, widest: number): HTMLElement {
@@ -43,19 +62,8 @@ function groupRow(group: Group, widest: number): HTMLElement {
   const estimate = element('span', 'group-estimate', group.jira ? `→ ${group.estimateHuman}` : 'sin Jira')
   head.append(title, worked, estimate)
 
-  const meta = element('div', 'group-meta')
-  const dot = element('i', 'dot')
-  dot.style.background = projectColor(group.projectId)
-  const blocks = group.entryIds.length === 1 ? '1 bloque' : `${group.entryIds.length} bloques`
-  const span =
-    group.days.length <= 1
-      ? ''
-      : ` · ${group.days[0]?.slice(5) ?? ''}–${group.days[group.days.length - 1]?.slice(5) ?? ''}`
   const part = group.partCount > 1 ? ` · parte ${group.partIndex}/${group.partCount}` : ''
-  meta.append(
-    dot,
-    element('span', undefined, `${group.projectName ?? 'sin proyecto'} · ${blocks}${span}${part}`),
-  )
+  const meta = rowMeta(group.projectId, group.projectName, group.entryIds, group.days, part)
 
   const span100 = group.jira ? group.estimateSeconds : group.totalSeconds
   const track = element('div', group.jira ? 'meter-track' : 'meter-track meter-track--outside')
@@ -81,16 +89,40 @@ function groupList(groups: Group[]): HTMLElement {
   return list
 }
 
+function workedRow(group: WorkedGroup, widest: number): HTMLElement {
+  const row = element('div', 'group')
+
+  const head = element('div', 'group-head')
+  head.append(
+    element('span', 'group-title', group.summary),
+    element('span', 'group-worked', human(group.totalSeconds)),
+    element('span', 'group-estimate', group.running ? 'corriendo' : ''),
+  )
+
+  const meta = rowMeta(group.projectId, group.projectName, group.entryIds, group.days)
+
+  const track = element('div', 'meter-track')
+  track.style.width = `${Math.max(4, Math.round((group.totalSeconds / widest) * 100))}%`
+  const fill = element('div', 'meter-fill')
+  fill.style.width = '100%'
+  track.append(fill)
+  const meter = element('div', 'meter')
+  meter.append(track)
+
+  row.append(head, meta, meter)
+  return row
+}
+
 export function renderWorked(
   view: HTMLElement,
-  data: SummaryView,
+  data: WorkedView,
   range: 'today' | 'week',
   onRange: (next: 'today' | 'week') => void,
 ): void {
   view.replaceChildren()
 
   const header = element('div', 'section-head')
-  header.append(pairOfTotals(data.totalSeconds, data.estimateSeconds, 'estimado'))
+  header.append(workedTotals(data.totalSeconds))
 
   const toggle = element('div', 'segmented')
   for (const option of ['today', 'week'] as const) {
@@ -105,11 +137,6 @@ export function renderWorked(
   }
   header.append(toggle)
   view.append(header)
-  if (data.nonJiraSeconds > 0) {
-    view.append(
-      element('p', 'caption', `${human(data.jiraSeconds)} para Jira · ${human(data.nonJiraSeconds)} fuera de Jira`),
-    )
-  }
 
   const days = new Set(data.groups.flatMap((group) => group.days))
   view.append(
@@ -139,14 +166,10 @@ export function renderWorked(
     return
   }
 
-  view.append(groupList(data.groups))
-  view.append(
-    element(
-      'p',
-      'legend',
-      'Lo lleno de la barra es el worklog; la cola es lo que añade la estimación original.',
-    ),
-  )
+  const widest = data.groups.reduce((most, group) => Math.max(most, group.totalSeconds), 1)
+  const list = element('div', 'groups')
+  for (const group of data.groups) list.append(workedRow(group, widest))
+  view.append(list)
 }
 
 function outsideJira(nonJira: NonJira | null): HTMLElement | null {
@@ -225,6 +248,7 @@ export function renderRepos(
   scopes: Scope[],
   catalog: Project[],
   handlers: ReposHandlers,
+  jiraKeys: Map<number, string> = new Map(),
 ): void {
   view.replaceChildren()
 
@@ -255,11 +279,8 @@ export function renderRepos(
     const dot = element('i', 'dot')
     dot.style.background = projectColor(project.id)
     row.append(dot, element('span', 'project-name', project.name))
-    if (!project.jira) {
-      row.append(element('span', 'tag tag--muted', 'sin Jira'))
-    } else if (project.jiraProjectKey !== null) {
-      row.append(element('span', 'tag', project.jiraProjectKey))
-    }
+    const jiraKey = jiraKeys.get(project.id)
+    if (jiraKey !== undefined) row.append(element('span', 'tag', jiraKey))
     projects.append(row)
   }
   view.append(projects)

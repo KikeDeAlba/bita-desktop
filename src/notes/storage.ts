@@ -279,7 +279,7 @@ function bar(current: StorageContext): HTMLElement {
   }
   row.append(element('span', 'st-bar-title', 'Almacenamiento'), element('span', 'spacer'))
   if (loading) row.append(element('span', 'v2-kbd', 'midiendo…'))
-  row.append(element('span', 'v2-kbd', '~/Recap · ~/.local/share/bita'))
+  row.append(element('span', 'v2-kbd', '~/Recap · ~/.local/share/bita · ~/.local/share/inkwell'))
   const refresh = document.createElement('button')
   refresh.type = 'button'
   refresh.className = 'icon-button reader-step'
@@ -430,7 +430,7 @@ function suggestions(rows: Row[]): HTMLElement | null {
   if (orphans.length > 0) {
     const size = orphans.reduce((sum, row) => sum + row.total, 0)
     section.append(
-      suggestionCard('var(--purple)', 'Huérfanas', `Reuniones sin página en bita · ${orphans.length}`, size, [
+      suggestionCard('var(--purple)', 'Huérfanas', `Reuniones sin página en inkwell · ${orphans.length}`, size, [
         actionButton('Revisar', () => {
           onlyOrphans = true
           spaceFilter = null
@@ -572,7 +572,7 @@ function table(rows: Row[], current: StorageContext): HTMLElement {
       pageId === undefined
         ? element('span', 'st-name-text', row.record.title)
         : button(row.record.title, 'st-name-text st-name-link', () => current.onOpenPage(pageId))
-    title.title = row.page === null ? 'Sin página en bita' : `Abrir ${row.page.title}`
+    title.title = row.page === null ? 'Sin página en inkwell' : `Abrir ${row.page.title}`
     name.append(dot, title)
     nameCell.append(name)
     if (isCompressing(id)) nameCell.append(element('span', 'st-tag st-tag--busy', 'comprimiendo…'))
@@ -726,7 +726,7 @@ async function deleteMany(records: MeetingRecord[]): Promise<void> {
   const size = records.reduce((sum, record) => sum + record.storage.totalBytes, 0)
   const ok = await confirmDialog({
     title: records.length === 1 ? '¿Borrar esta reunión?' : `¿Borrar ${records.length} reuniones?`,
-    body: `Se borra la carpeta completa en ~/Recap (${formatBytes(size)}): grabación, capturas, transcripción y minuta. Las páginas de bita no se tocan. No se puede deshacer.`,
+    body: `Se borra la carpeta completa en ~/Recap (${formatBytes(size)}): grabación, capturas, transcripción y minuta. Las páginas de inkwell no se tocan. No se puede deshacer.`,
     confirm: 'Borrar reunión',
     danger: true,
   })
