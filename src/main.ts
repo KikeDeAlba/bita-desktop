@@ -21,6 +21,7 @@ import {
   projects,
   jiraProjects,
   jiraKeyMap,
+  noJiraSet,
   refresh,
   scopes,
   setScope,
@@ -547,6 +548,7 @@ async function loadRepos(): Promise<void> {
         onRemoveScope: (prefix) => void reposAction(() => unsetScope(prefix), 'scopes'),
       },
       jiraKeyMap(jira),
+      noJiraSet(jira),
     )
   } catch (error) {
     if (tab === 'repos') failureView(error)
