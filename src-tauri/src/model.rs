@@ -44,6 +44,7 @@ pub struct Entry {
     pub local_day: String,
     pub duration_seconds: i64,
     pub duration_human: String,
+    #[serde(default)]
     pub registered: bool,
     pub running: bool,
     #[serde(default)]
@@ -286,5 +287,24 @@ mod tests {
         let mut entry = envelope.data.expect("data").remove(0);
         entry.description = "   ".into();
         assert!(entry.is_draft());
+    }
+
+    const BITA_1_CURRENT: &str = r#"{"schemaVersion":3,"ok":true,"command":"current","generatedAt":"2026-10-10T23:00:32.773Z","meta":{"runningCount":1,"totalSeconds":0,"totalHuman":"0m"},"data":[{"id":2,"externalId":null,"description":"Revisar","projectId":1,"projectName":"Contrato","clientName":"Acme","billable":false,"start":"2026-10-10T23:00:32.693Z","stop":null,"startLocal":"2026-10-10T17:00:32-06:00","localDay":"2026-10-10","durationSeconds":0,"durationHuman":"0m","durationHours":0,"startedJira":"2026-10-10T17:00:32.693-0600","running":true,"mergedInto":null,"kind":null}]}"#;
+
+    const BITA_1_ENTRIES: &str = r#"{"schemaVersion":3,"ok":true,"command":"entries","generatedAt":"2026-10-10T23:00:32.852Z","meta":{"range":{"fromDay":"2026-10-10","toDay":"2026-10-10","timezone":"America/Mexico_City"},"entryCount":2,"totalSeconds":1800,"totalHuman":"30m","overlaps":[],"warnings":[]},"data":[{"id":1,"externalId":null,"description":"Rotar el secreto","projectId":1,"projectName":"Contrato","clientName":"Acme","billable":false,"start":"2026-10-10T06:10:00.000Z","stop":"2026-10-10T06:40:00.000Z","startLocal":"2026-10-10T00:10:00-06:00","localDay":"2026-10-10","durationSeconds":1800,"durationHuman":"30m","durationHours":0.5,"startedJira":"2026-10-10T00:10:00.000-0600","running":false,"mergedInto":null,"kind":null,"segments":[]},{"id":2,"externalId":null,"description":"Revisar","projectId":1,"projectName":"Contrato","clientName":"Acme","billable":false,"start":"2026-10-10T23:00:32.693Z","stop":null,"startLocal":"2026-10-10T17:00:32-06:00","localDay":"2026-10-10","durationSeconds":0,"durationHuman":"0m","durationHours":0,"startedJira":"2026-10-10T17:00:32.693-0600","running":true,"mergedInto":null,"kind":null,"segments":[]}]}"#;
+
+    #[test]
+    fn bita_1_entries_without_registered_or_issue_key_parse() {
+        let envelope: Envelope<Vec<Entry>> = serde_json::from_str(BITA_1_CURRENT).expect("current");
+        assert_eq!(envelope.schema_version, SUPPORTED_SCHEMA);
+        let running = envelope.data.expect("data").remove(0);
+        assert!(running.running && !running.registered);
+        assert_eq!(running.project_name.as_deref(), Some("Contrato"));
+
+        let envelope: Envelope<Vec<Entry>> = serde_json::from_str(BITA_1_ENTRIES).expect("entries");
+        let entries = envelope.data.expect("data");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].stop.as_deref(), Some("2026-10-10T06:40:00.000Z"));
+        assert!(entries.iter().all(|entry| !entry.registered));
     }
 }

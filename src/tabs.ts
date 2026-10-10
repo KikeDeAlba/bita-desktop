@@ -248,6 +248,7 @@ export function renderRepos(
   scopes: Scope[],
   catalog: Project[],
   handlers: ReposHandlers,
+  jiraKeys: Map<number, string> = new Map(),
 ): void {
   view.replaceChildren()
 
@@ -278,11 +279,8 @@ export function renderRepos(
     const dot = element('i', 'dot')
     dot.style.background = projectColor(project.id)
     row.append(dot, element('span', 'project-name', project.name))
-    if (!project.jira) {
-      row.append(element('span', 'tag tag--muted', 'sin Jira'))
-    } else if (project.jiraProjectKey !== null) {
-      row.append(element('span', 'tag', project.jiraProjectKey))
-    }
+    const jiraKey = jiraKeys.get(project.id)
+    if (jiraKey !== undefined) row.append(element('span', 'tag', jiraKey))
     projects.append(row)
   }
   view.append(projects)

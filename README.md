@@ -73,7 +73,10 @@ La pestaña **Hoy** no le pide un resumen a nadie: lee `bita entries today|week
 espacios ni la puntuación final), con la duración de cada bloque, los que están
 corriendo incluidos, y avisa de los días con cronómetros solapados. La pestaña
 **Jira** es `tally summary --pending --json`: los grupos, la estimación y lo que
-queda fuera de Jira los decide tally. Las notas de cada cronómetro son
+queda fuera de Jira los decide tally, y la clave de Jira de cada proyecto (en
+Repos y en los ajustes del espacio) sale de `tally map list --json`. Den lee
+igual los proyectos y las entradas de bita 0.18 y de bita 1.0, que ya no traen
+`registered`, `issueKey` ni los datos de Jira. Las notas de cada cronómetro son
 `inkwell note ls|show|search`.
 
 Si inkwell todavía no trae los docs de bita (`inkwell migrate status --json`
