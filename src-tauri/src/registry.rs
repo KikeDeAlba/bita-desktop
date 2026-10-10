@@ -485,6 +485,7 @@ pub fn path_for(bin: &[OsString]) -> OsString {
             parts.push(parent.to_path_buf());
         }
     }
+    parts.extend(node::candidate_dirs());
     if !cfg!(windows) {
         if let Some(home) = platform::home() {
             parts.push(home.join(".volta").join("bin"));
