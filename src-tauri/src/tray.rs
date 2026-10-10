@@ -21,17 +21,19 @@ const MAX_LABEL_CHARS: usize = 12;
 
 const UNNAMED: &str = "sin nombre";
 
+const TOOLTIP: &str = "Den — clic para abrir, clic derecho para salir";
+
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, OPEN, "Abrir Den", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, QUIT, "Salir de Den", true, Some("Cmd+Q"))?;
+    let quit = MenuItem::with_id(app, QUIT, "Salir de Den", true, Some("CmdOrCtrl+Q"))?;
     let live = MenuItem::with_id(app, LIVE, "Asistente de reunión", true, None::<&str>)?;
     let wide = MenuItem::with_id(app, LIVE_WIDE, "Ventana amplia", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &live, &wide, &PredefinedMenuItem::separator(app)?, &quit])?;
 
     TrayIconBuilder::with_id(ID)
-        .icon(Image::from_bytes(TEMPLATE_ICON)?)
-        .icon_as_template(true)
-        .tooltip("Den — clic para abrir, clic derecho para salir")
+        .icon(tray_icon(app)?)
+        .icon_as_template(cfg!(target_os = "macos"))
+        .tooltip(TOOLTIP)
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
@@ -78,13 +80,35 @@ fn remember(app: &AppHandle, event: &TrayIconEvent) {
 
     app.state::<TrayAnchor>().remember(Anchor {
         center_x: position.x + size.width / 2.0,
+        top_y: position.y,
         bottom_y: position.y + size.height,
     });
 }
 
+fn tray_icon(app: &AppHandle) -> tauri::Result<Image<'static>> {
+    if !cfg!(target_os = "macos") {
+        if let Some(icon) = app.default_window_icon() {
+            return Ok(icon.clone().to_owned());
+        }
+    }
+    Image::from_bytes(TEMPLATE_ICON)
+}
+
 pub fn set_title(app: &AppHandle, title: &str) {
     if let Some(tray) = app.tray_by_id(ID) {
+        #[cfg(not(windows))]
         let _ = tray.set_title(Some(title));
+        #[cfg(not(target_os = "macos"))]
+        let _ = tray.set_tooltip(Some(tooltip_for(title)));
+    }
+}
+
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+pub fn tooltip_for(title: &str) -> String {
+    if title.is_empty() {
+        TOOLTIP.to_string()
+    } else {
+        format!("bita — {title}")
     }
 }
 
@@ -134,7 +158,7 @@ fn truncate(text: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_clock, format_title, truncate};
+    use super::{format_clock, format_title, tooltip_for, truncate, TOOLTIP};
     use crate::model::LiveTimer;
 
     fn timer(
@@ -213,6 +237,12 @@ mod tests {
         assert_eq!(format_clock(3599), "0:59");
         assert_eq!(format_clock(3600), "1:00");
         assert_eq!(format_clock(36_000), "10:00");
+    }
+
+    #[test]
+    fn the_tooltip_carries_the_clock_where_there_is_no_title() {
+        assert_eq!(tooltip_for(""), TOOLTIP);
+        assert_eq!(tooltip_for("0:58 Pharma STI"), "bita — 0:58 Pharma STI");
     }
 
     #[test]

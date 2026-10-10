@@ -12,6 +12,7 @@ use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::cli::node;
+use crate::platform;
 
 pub const REGISTRY_ENV: &str = "KIT_REGISTRY_DIR";
 pub const MANIFEST_VERSION: u64 = 1;
@@ -69,12 +70,7 @@ fn real_var(key: &str) -> Option<OsString> {
 }
 
 pub fn home_dir() -> Option<PathBuf> {
-    if cfg!(windows) {
-        if let Some(profile) = std::env::var_os("USERPROFILE") {
-            return Some(PathBuf::from(profile));
-        }
-    }
-    node::home()
+    platform::home()
 }
 
 impl Platform<'static> {
@@ -475,9 +471,7 @@ pub fn path_for(bin: &[OsString]) -> OsString {
     let mut parts: Vec<PathBuf> = Vec::new();
     for item in bin.iter().filter(|item| Path::new(item).is_absolute()) {
         if let Some(parent) = Path::new(item).parent().filter(|parent| !parent.as_os_str().is_empty()) {
-            if !parts.iter().any(|known| known == parent) {
-                parts.push(parent.to_path_buf());
-            }
+            parts.push(parent.to_path_buf());
         }
     }
     if let Some(node) = std::env::var_os("BITA_NODE") {
@@ -486,34 +480,15 @@ pub fn path_for(bin: &[OsString]) -> OsString {
         }
     }
     if !cfg!(windows) {
-        if let Some(home) = node::home() {
-            parts.push(home.join(".volta/bin"));
-            parts.push(home.join("Library/pnpm"));
-            parts.push(home.join(".local/bin"));
-        }
-        parts.push(PathBuf::from("/opt/homebrew/bin"));
-        parts.push(PathBuf::from("/usr/local/bin"));
-    }
-    if cfg!(windows) {
-        if let Some(system) = std::env::var_os("SystemRoot") {
-            let root = PathBuf::from(system);
-            parts.push(root.join("System32"));
-            parts.push(root);
-        }
-    } else {
-        for base in ["/usr/bin", "/bin", "/usr/sbin", "/sbin"] {
-            parts.push(PathBuf::from(base));
+        if let Some(home) = platform::home() {
+            parts.push(home.join(".volta").join("bin"));
+            parts.push(home.join("Library").join("pnpm"));
+            parts.push(home.join(".local").join("share").join("pnpm"));
+            parts.push(home.join(".local").join("bin"));
         }
     }
-    std::env::join_paths(parts).unwrap_or_default()
-}
-
-fn neutral_dir() -> PathBuf {
-    if cfg!(windows) {
-        std::env::temp_dir()
-    } else {
-        PathBuf::from("/")
-    }
+    parts.extend(platform::package_manager_dirs());
+    platform::search_path(parts)
 }
 
 pub fn passes_through(key: &str) -> bool {
@@ -523,16 +498,17 @@ pub fn passes_through(key: &str) -> bool {
 pub fn command(bin: &[OsString], path: Option<OsString>) -> Option<Command> {
     let (program, prefix) = bin.split_first()?;
     let mut command = Command::new(program);
-    command
+    platform::quiet(&mut command)
         .args(prefix)
-        .current_dir(neutral_dir())
+        .current_dir(platform::neutral_dir())
         .env_clear()
+        .envs(platform::essential_env())
         .env("PATH", path.unwrap_or_else(|| path_for(bin)))
         .env("NO_COLOR", "1")
         .env("TERM", "dumb")
         .stdin(Stdio::null())
         .kill_on_drop(true);
-    if let Some(home) = node::home() {
+    if let Some(home) = platform::home() {
         command.env("HOME", home);
     }
     for (key, value) in node::identity() {
@@ -1213,6 +1189,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_manifest_whose_binary_is_gone_is_not_installed() {
         let present = parse_manifest(&manifest_json("bita", &["/bin/sh", "relative.js"], &[])).expect("valid");

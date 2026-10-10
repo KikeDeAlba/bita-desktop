@@ -99,13 +99,11 @@ pub fn recap_command(recap: &[OsString], path: Option<OsString>) -> Option<Comma
 pub fn assistant_path(recap: &[OsString]) -> OsString {
     let mut parts: Vec<PathBuf> = Vec::new();
     if let Some(home) = node::home() {
-        parts.push(home.join(".local/bin"));
-        parts.push(home.join(".claude/local"));
+        parts.push(home.join(".local").join("bin"));
+        parts.push(home.join(".claude").join("local"));
     }
-    parts.push(PathBuf::from("/opt/homebrew/bin"));
-    parts.push(PathBuf::from("/usr/local/bin"));
     parts.extend(std::env::split_paths(&crate::registry::path_for(recap)));
-    std::env::join_paths(parts).unwrap_or_default()
+    crate::platform::search_path(parts)
 }
 
 pub(crate) fn parse(stdout: &str, stderr: &str) -> Result<Value, RecapError> {

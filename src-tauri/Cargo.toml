@@ -17,6 +17,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 notify = "8"
 notify-debouncer-full = "0.7"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
 
 [target."cfg(target_os = \"macos\")".dependencies]
 objc2 = "0.6"

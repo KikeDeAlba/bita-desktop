@@ -3,6 +3,7 @@ import { element, icon } from '../dom.ts'
 import { projectColor } from '../tabs.ts'
 import { foldForSearch } from './markdown.ts'
 import './spaces.css'
+import { modKey } from '../platform.ts'
 
 export interface SwitcherOptions {
   anchor: HTMLElement
@@ -49,7 +50,7 @@ export function openSwitcher(options: SwitcherOptions): void {
   input.autocomplete = 'off'
   input.spellcheck = false
   input.setAttribute('aria-label', 'Filtrar espacios')
-  field.append(glass, input, element('span', 'kbd', '⌘K'))
+  field.append(glass, input, element('span', 'kbd', modKey('K')))
 
   const list = element('div', 'switcher-list')
   list.setAttribute('role', 'listbox')
@@ -103,7 +104,7 @@ export function openSwitcher(options: SwitcherOptions): void {
 
     shown.forEach((space, index) => {
       const position = main.indexOf(space)
-      list.append(row(space, index, position < 9 ? `⌘${position + 1}` : null))
+      list.append(row(space, index, position < 9 ? modKey(String(position + 1)) : null))
     })
     if (shown.length === 0 && shownQuiet.length === 0) {
       list.append(element('p', 'switcher-empty', `Ningún espacio se llama «${input.value.trim()}».`))

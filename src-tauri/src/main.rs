@@ -14,11 +14,12 @@ mod live_wide;
 mod meeting;
 mod notes_cmd;
 mod panel;
-mod pasteboard;
 mod pdf;
+mod platform;
 mod proposals;
 mod recap;
 mod registry;
+#[cfg(target_os = "macos")]
 mod screen;
 mod state;
 mod sync;
@@ -48,6 +49,7 @@ fn main() {
             panel::toggle(app);
         }))
         .plugin(live::shortcut_plugin())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState::new())
         .manage(live::LiveSession::default())
         .manage(TrayAnchor::default())
@@ -138,6 +140,7 @@ fn main() {
             }
         })
         .setup(|app| {
+            #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             tools::migrate_app_settings(app.handle());
             menu::create(app.handle())?;

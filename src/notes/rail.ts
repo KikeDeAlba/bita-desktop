@@ -6,6 +6,7 @@ import type { PageResult, SearchScope } from './search.ts'
 import { formatBytes } from './media-dialogs.ts'
 import { withPages } from './switcher.ts'
 import './spaces.css'
+import { modKey } from '../platform.ts'
 
 export type SelectionKind = 'page' | 'entry' | 'backlog' | 'meetings' | 'storage' | 'space-settings' | 'atlassian'
 
@@ -166,7 +167,7 @@ function switcherButton(state: RailState, handlers: RailHandlers): HTMLElement {
     lines.append(element('span', 'space-switch-meta', state.client === null ? pages : `${state.client} · ${pages}`))
   }
   button.append(dot, lines, icon('chevronDown', 12))
-  button.title = 'Cambiar de espacio (⌘K)'
+  button.title = `Cambiar de espacio (${modKey('K')})`
   button.addEventListener('click', () => handlers.onSwitcher(button))
   return button
 }

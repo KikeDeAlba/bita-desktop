@@ -295,7 +295,7 @@ pub fn bita_docs_root() -> PathBuf {
     let database = database_path();
     match database.parent() {
         Some(parent) => parent.join("docs"),
-        None => PathBuf::from("/tmp").join("docs"),
+        None => env::temp_dir().join("docs"),
     }
 }
 
@@ -311,7 +311,7 @@ pub fn database_path() -> PathBuf {
     let data_home = env::var_os("XDG_DATA_HOME")
         .map(PathBuf::from)
         .or_else(|| node::home().map(|home| home.join(".local/share")))
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
+        .unwrap_or_else(env::temp_dir);
 
     data_home.join("bita").join("bita.db")
 }
@@ -361,6 +361,7 @@ fi
         let _ = fs::remove_dir_all(&root);
     }
 
+    #[cfg(unix)]
     #[test]
     fn keeps_a_node_script_or_a_symlink_to_one() {
         let root = scratch("node");

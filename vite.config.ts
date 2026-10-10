@@ -5,7 +5,7 @@ const host = process.env['TAURI_DEV_HOST']
 export default defineConfig({
   clearScreen: false,
   build: {
-    target: 'safari18',
+    target: ['es2022', 'safari16', 'chrome111', 'firefox115'],
     rollupOptions: {
       input: { index: 'index.html', notas: 'notas.html', live: 'live.html', 'live-wide': 'live-wide.html' },
     },
