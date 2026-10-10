@@ -33,7 +33,6 @@ const POLL: Duration = Duration::from_secs(1);
 const CALL_TIMEOUT: Duration = Duration::from_secs(20);
 const SETTINGS_FILE: &str = "live.json";
 const STATE_DIR_ENV: &str = "RECAP_STATE_DIR";
-const EDITOR_OPEN: &str = "/usr/bin/open";
 const AUTO_ASK_MIN_SECONDS: i64 = 10;
 const AUTO_ASK_MAX_SECONDS: i64 = 120;
 const AUTO_ASK_MIN_CONCURRENCY: i64 = 1;
@@ -892,15 +891,12 @@ pub fn openable_file(path: &str) -> Result<PathBuf, Problem> {
 #[tauri::command]
 pub async fn open_source_file(path: String) -> Result<(), Problem> {
     let target = openable_file(&path)?;
-    let mut command = match crate::cli::editor_override() {
-        Some(editor) => Command::new(editor),
-        None => {
-            let mut open = Command::new(EDITOR_OPEN);
-            open.arg("-t");
-            open
-        }
+    let Some(editor) = crate::cli::editor_override() else {
+        return crate::platform::open_as_text(&target)
+            .await
+            .map_err(|error| Problem::new(ProblemKind::CliFailed, format!("No pude abrir {}: {error}", target.display())));
     };
-    command
+    crate::platform::quiet(&mut Command::new(editor))
         .arg(&target)
         .status()
         .await
@@ -937,16 +933,20 @@ mod tests {
 
     #[test]
     fn the_state_directory_honours_the_override_then_xdg_then_home() {
-        let home = Some(PathBuf::from("/Users/x"));
+        let root = std::env::temp_dir();
+        let home = Some(root.join("Users").join("x"));
         assert_eq!(
-            state_dir_from(Some(PathBuf::from("/tmp/state")), None, home.clone()),
-            Some(PathBuf::from("/tmp/state"))
+            state_dir_from(Some(root.join("state")), None, home.clone()),
+            Some(root.join("state"))
         );
         assert_eq!(
-            state_dir_from(None, Some(PathBuf::from("/xdg")), home.clone()),
-            Some(PathBuf::from("/xdg/recap"))
+            state_dir_from(None, Some(root.join("xdg")), home.clone()),
+            Some(root.join("xdg").join("recap"))
         );
-        assert_eq!(state_dir_from(None, Some(PathBuf::from("rel")), home.clone()), Some(PathBuf::from("/Users/x/.local/state/recap")));
+        assert_eq!(
+            state_dir_from(None, Some(PathBuf::from("rel")), home.clone()),
+            Some(root.join("Users").join("x").join(".local/state/recap"))
+        );
         assert_eq!(state_dir_from(None, None, None), None);
     }
 

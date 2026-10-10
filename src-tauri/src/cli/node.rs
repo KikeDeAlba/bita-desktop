@@ -1,9 +1,12 @@
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::{env, fs};
 
 use tokio::process::Command;
+
+use crate::platform;
 
 pub const MIN_MAJOR: u32 = 24;
 
@@ -21,7 +24,7 @@ pub async fn discover() -> Option<PathBuf> {
 }
 
 pub async fn major_version(node: &Path) -> Option<u32> {
-    let output = Command::new(node)
+    let output = platform::quiet(&mut Command::new(node))
         .arg("-p")
         .arg("process.versions.node")
         .stdin(Stdio::null())
@@ -36,11 +39,11 @@ pub async fn major_version(node: &Path) -> Option<u32> {
 }
 
 pub fn home() -> Option<PathBuf> {
-    env::var_os("HOME").map(PathBuf::from)
+    platform::home()
 }
 
 pub fn identity() -> Vec<(&'static str, std::ffi::OsString)> {
-    identity_from(env::var_os("USER"), env::var_os("LOGNAME"), home())
+    identity_from(env::var_os("USER").or_else(|| env::var_os("USERNAME")), env::var_os("LOGNAME"), home())
 }
 
 fn identity_from(
@@ -65,28 +68,19 @@ fn candidates() -> Vec<PathBuf> {
         found.push(PathBuf::from(explicit));
     }
 
-    if let Some(home) = home() {
-        found.extend(managed(&home.join(".nvm/versions/node"), &["bin", "node"]));
-        found.extend(managed(
-            &home.join(".local/share/fnm/node-versions"),
-            &["installation", "bin", "node"],
-        ));
-        found.extend(managed(&home.join(".asdf/installs/nodejs"), &["bin", "node"]));
-        found.push(home.join(".volta/bin/node"));
-        found.push(home.join("Library/pnpm/node"));
-        found.push(home.join(".local/bin/node"));
+    let home = home();
+    for location in platform::managed_node_roots(home.as_deref()) {
+        found.extend(managed(&location.root, &location.tail));
     }
+    found.extend(platform::node_locations(home.as_deref()));
+    found.extend(platform::on_path(&platform::executable("node")));
 
-    found.push(PathBuf::from("/opt/homebrew/bin/node"));
-    found.push(PathBuf::from("/usr/local/bin/node"));
-    found.push(PathBuf::from("/usr/bin/node"));
-
-    found.retain(|candidate| candidate.is_file());
-    found.dedup();
+    let mut seen = HashSet::new();
+    found.retain(|candidate| candidate.is_file() && seen.insert(candidate.clone()));
     found
 }
 
-fn managed(root: &Path, tail: &[&str]) -> Vec<PathBuf> {
+fn managed(root: &Path, tail: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
     };
@@ -104,13 +98,7 @@ fn managed(root: &Path, tail: &[&str]) -> Vec<PathBuf> {
 
     versions
         .into_iter()
-        .map(|(_, name)| {
-            let mut path = root.join(name);
-            for part in tail {
-                path = path.join(part);
-            }
-            path
-        })
+        .map(|(_, name)| root.join(name).join(tail))
         .collect()
 }
 

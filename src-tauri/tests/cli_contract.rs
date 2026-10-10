@@ -12,13 +12,14 @@ fn vendored_cli() -> PathBuf {
 }
 
 fn node() -> Option<PathBuf> {
-    let home = env::var_os("HOME").map(PathBuf::from)?;
     let mut candidates: Vec<PathBuf> = Vec::new();
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let roots = match home.as_ref() {
+        Some(home) => vec![home.join(".nvm/versions/node"), home.join(".local/share/fnm/node-versions")],
+        None => Vec::new(),
+    };
 
-    for root in [
-        home.join(".nvm/versions/node"),
-        home.join(".local/share/fnm/node-versions"),
-    ] {
+    for root in roots {
         if let Ok(entries) = fs::read_dir(&root) {
             let mut names: Vec<String> = entries
                 .flatten()
@@ -35,6 +36,10 @@ fn node() -> Option<PathBuf> {
     candidates.push(PathBuf::from("/opt/homebrew/bin/node"));
     candidates.push(PathBuf::from("/usr/local/bin/node"));
     candidates.push(PathBuf::from("/usr/bin/node"));
+    if let Some(path) = env::var_os("PATH") {
+        let name = if cfg!(windows) { "node.exe" } else { "node" };
+        candidates.extend(env::split_paths(&path).map(|directory| directory.join(name)));
+    }
 
     candidates.into_iter().find(|candidate| candidate.is_file())
 }

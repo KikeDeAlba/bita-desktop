@@ -2,13 +2,14 @@ use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
+use tauri_plugin_clipboard_manager::ClipboardExt;
 use tokio::process::Command;
 
 use crate::cli;
+use crate::platform;
 use crate::model::{Problem, ProblemKind};
 use crate::state::AppState;
 
-const OPEN: &str = "/usr/bin/open";
 const MIN_CLI: &str = "0.4.0";
 const BACKLOG_CLI: &str = "0.7.0";
 
@@ -275,8 +276,15 @@ fn stale_backlog(problem: Problem) -> Problem {
 pub async fn open_document(rel_path: String) -> Result<(), Problem> {
     let absolute = inside_docs_root(&rel_path)?;
 
-    let opener = cli::editor_override().unwrap_or_else(|| OPEN.into());
-    let status = Command::new(&opener)
+    let Some(editor) = cli::editor_override() else {
+        return platform::open_path(&absolute).map_err(|error| {
+            Problem::new(
+                ProblemKind::CliFailed,
+                format!("No pude abrir {}: {error}", absolute.display()),
+            )
+        });
+    };
+    let status = platform::quiet(&mut Command::new(&editor))
         .arg(&absolute)
         .status()
         .await
@@ -356,25 +364,19 @@ pub async fn open_external(url: String) -> Result<(), Problem> {
         ));
     }
 
-    Command::new(OPEN)
-        .arg(parsed)
-        .status()
-        .await
-        .map_err(|error| {
-            Problem::new(ProblemKind::CliFailed, format!("No pude abrir el enlace: {error}"))
-        })
-        .map(|_| ())
+    platform::open_url(parsed).map_err(|error| {
+        Problem::new(ProblemKind::CliFailed, format!("No pude abrir el enlace: {error}"))
+    })
 }
 
 #[tauri::command]
-pub fn copy_text(text: String) -> Result<(), Problem> {
-    if crate::pasteboard::write(&text) {
-        return Ok(());
-    }
-    Err(Problem::new(
-        ProblemKind::Unreadable,
-        "No pude escribir en el portapapeles.",
-    ))
+pub fn copy_text(app: AppHandle, text: String) -> Result<(), Problem> {
+    app.clipboard().write_text(text).map_err(|error| {
+        Problem::new(
+            ProblemKind::Unreadable,
+            format!("No pude escribir en el portapapeles: {error}"),
+        )
+    })
 }
 
 fn relative_inside(rel_path: &str) -> Result<&Path, &'static str> {

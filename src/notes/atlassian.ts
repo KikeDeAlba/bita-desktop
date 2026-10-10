@@ -10,6 +10,7 @@ import {
 } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import { button, confirmDialog } from './media-dialogs.ts'
+import { keychain, keychainShort } from '../platform.ts'
 
 export interface AtlassianContext {
   railOpen: boolean
@@ -160,7 +161,7 @@ function siteCard(site: AtlassianSite): HTMLElement {
   else if (site.status === 'unreachable') pills.append(pill('no responde', 'warn'))
   pills.append(site.jira ? pill('Jira', site.status === 'ok' ? 'ok' : '') : pill('sin Jira'))
   pills.append(site.confluence ? pill('Confluence', site.status === 'ok' ? 'ok' : '') : pill('sin Confluence'))
-  pills.append(site.tokenStored ? pill('token en el Llavero') : pill('sin token', 'warn'))
+  pills.append(site.tokenStored ? pill(`token en ${keychainShort}`) : pill('sin token', 'warn'))
 
   const used = element('span', 'v2-kbd', site.projects.length === 0 ? 'ningún espacio la usa todavía' : `usada por ${site.projects.join(' · ')}`)
   text.append(name, pills, used)
@@ -227,7 +228,7 @@ function addForm(): HTMLElement {
     field('ac-email', 'Correo de la cuenta', 'email', 'tu@empresa.com', formEmail, (value) => {
       formEmail = value
     }),
-    field('ac-token', 'API token', 'password', 'Se guarda en el Llavero de macOS', '', () => undefined),
+    field('ac-token', 'API token', 'password', `Se guarda en ${keychain}`, '', () => undefined),
   )
   const submit = button(adding ? 'Probando…' : 'Probar y guardar', 'v2-btn v2-btn--primary ac-submit', () => void addSite())
   submit.disabled = adding
@@ -302,7 +303,7 @@ async function removeSite(site: AtlassianSite): Promise<void> {
   const used = site.projects.length > 0 ? ` La usan ${site.projects.join(', ')}; esos espacios se quedan sin sitio.` : ''
   const ok = await confirmDialog({
     title: `¿Quitar ${hostName(site.site)}?`,
-    body: `Se borra el token del Llavero y bita CLI deja de hablar con esa organización.${used}`,
+    body: `Se borra el token de ${keychainShort} y bita CLI deja de hablar con esa organización.${used}`,
     confirm: 'Quitar',
     danger: true,
   })

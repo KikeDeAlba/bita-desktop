@@ -8,6 +8,7 @@ import './reader.css'
 import { assetsRelDirOf } from './drawio.ts'
 import { foldForSearch } from './markdown.ts'
 import { renderAnswers, renderProposals } from './proposals.ts'
+import { modKey } from '../platform.ts'
 import {
   meetingChip,
   renderMinutes,
@@ -141,7 +142,7 @@ function bar(state: ReaderState, handlers: ReaderHandlers): HTMLElement {
     nav.append(element('span', 'hit-count', `«${state.query.trim()}» ${state.hit + 1} de ${state.hitCount}`))
     nav.append(iconAction('up', 'Coincidencia anterior', () => handlers.onHit(-1)))
     nav.append(iconAction('down', 'Coincidencia siguiente', () => handlers.onHit(1)))
-    nav.append(element('span', 'kbd hit-key', '⌘G'))
+    nav.append(element('span', 'kbd hit-key', modKey('G')))
     row.append(nav)
   }
 

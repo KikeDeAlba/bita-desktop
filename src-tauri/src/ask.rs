@@ -252,7 +252,13 @@ mod tests {
     #[test]
     fn a_child_spawns_from_a_thread_outside_the_runtime() {
         let status = std::thread::spawn(|| {
-            let mut command = tokio::process::Command::new("/usr/bin/true");
+            let mut command = if cfg!(windows) {
+                let mut shell = tokio::process::Command::new("cmd");
+                shell.args(["/C", "exit 0"]);
+                shell
+            } else {
+                tokio::process::Command::new("/usr/bin/true")
+            };
             spawn_in_runtime(&mut command).map(|_| ())
         })
         .join()

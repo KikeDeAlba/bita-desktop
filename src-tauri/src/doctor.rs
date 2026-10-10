@@ -11,10 +11,13 @@ use tokio::time::timeout;
 
 use crate::cli::{self, node, Source};
 use crate::model::{Problem, ProblemKind};
+use crate::platform;
 
 const BUNDLED_ROOT: &str = "bita";
 const INSTALL_TIMEOUT: Duration = Duration::from_secs(60);
 const COPY_DIR: &str = ".local/share/bita-desktop/cli";
+const SCRIPTED_INSTALL: bool = cfg!(unix);
+const MANUAL_INSTALL: &str = "npm install -g @kikedealba/bita && bita setup";
 
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -99,17 +102,13 @@ pub async fn report(app: &AppHandle) -> Report {
                 health: Health::Fail,
                 title: format!("Falta Node {} o superior", node::MIN_MAJOR),
                 detail: "Es lo único que la app no puede resolver sola.".into(),
-                note: Some(if which("brew").is_some() {
-                    "brew install node".into()
-                } else {
-                    "https://nodejs.org".into()
-                }),
+                note: Some(node_hint()),
             });
         }
     }
 
     let source = cli::resolve_entry(app);
-    let can_install = matches!(source, Some((_, Source::Bundled))) && !blocked;
+    let can_install = matches!(source, Some((_, Source::Bundled))) && !blocked && SCRIPTED_INSTALL;
     match source.as_ref() {
         Some((path, Source::Installed)) => {
             let found = node
@@ -200,6 +199,13 @@ pub async fn report(app: &AppHandle) -> Report {
 }
 
 pub async fn install(app: &AppHandle) -> Result<String, Problem> {
+    if !SCRIPTED_INSTALL {
+        return Err(Problem::new(
+            ProblemKind::CliMissing,
+            "En este sistema el CLI se instala desde la terminal.",
+        )
+        .with_hint(Some(MANUAL_INSTALL.into())));
+    }
     let node = node::discover().await.ok_or_else(|| {
         Problem::new(
             ProblemKind::NodeMissing,
@@ -237,22 +243,15 @@ pub async fn install(app: &AppHandle) -> Result<String, Problem> {
         )
     })?;
 
-    let node_dir = node
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("/usr/bin"));
-
     let output = timeout(
         INSTALL_TIMEOUT,
         Command::new("/bin/bash")
             .arg(target.join("scripts/install.sh"))
             .current_dir(&target)
             .env_clear()
+            .envs(platform::essential_env())
             .env("HOME", &home)
-            .env(
-                "PATH",
-                format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", node_dir.display()),
-            )
+            .env("PATH", platform::search_path(node.parent().map(Path::to_path_buf)))
             .env("BITA_BIN_DIR", &bin_dir)
             .stdin(Stdio::null())
             .kill_on_drop(true)
@@ -316,14 +315,11 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn which(program: &str) -> Option<PathBuf> {
-    for directory in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"] {
-        let candidate = Path::new(directory).join(program);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
+fn node_hint() -> String {
+    if cfg!(target_os = "macos") && platform::find_in(platform::package_manager_dirs(), "brew").is_none() {
+        return "https://nodejs.org".into();
     }
-    None
+    platform::node_install_hint().into()
 }
 
 #[cfg(test)]
