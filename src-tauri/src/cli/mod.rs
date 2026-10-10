@@ -7,20 +7,17 @@ use std::time::Duration;
 use std::{env, fs};
 
 use serde::de::DeserializeOwned;
-use tauri::path::BaseDirectory;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
 use crate::model::{CliError, Envelope, Problem, ProblemKind, SUPPORTED_SCHEMA};
-use crate::platform;
+use crate::registry::{self, Origin, Tool};
 
-const CLI_OVERRIDE_ENV: &str = "BITA_CLI";
 const DB_OVERRIDE_ENV: &str = "BITA_DB_PATH";
 const DOCS_OVERRIDE_ENV: &str = "BITA_DOCS_DIR";
 const EDITOR_OVERRIDE_ENV: &str = "BITA_EDITOR";
-const BUNDLED_ENTRY: &str = "bita/src/bin/bita.ts";
 const CALL_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Default)]
@@ -43,59 +40,42 @@ impl CallOptions {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    Installed,
-    Bundled,
-}
-
 #[derive(Debug, Clone)]
 pub struct Cli {
-    node: PathBuf,
-    entry: PathBuf,
-    source: Source,
+    tool: Tool,
+    bin: Vec<OsString>,
+    origin: Origin,
     db_path: PathBuf,
-    path_env: OsString,
 }
 
 impl Cli {
-    pub async fn discover(app: &AppHandle) -> Result<Self, Problem> {
-        let node = node::discover().await.ok_or_else(|| {
-            Problem::new(
-                ProblemKind::NodeMissing,
-                format!("No encuentro Node {} o superior.", node::MIN_MAJOR),
-            )
-            .with_hint(Some(platform::node_install_hint().into()))
-        })?;
+    pub async fn discover(_app: &AppHandle) -> Result<Self, Problem> {
+        Self::for_tool(Tool::Bita).await
+    }
 
-        let (entry, source) = resolve_entry(app).ok_or_else(|| {
-            Problem::new(
-                ProblemKind::CliMissing,
-                "No encuentro el CLI de bita, ni instalado ni dentro de la app.",
-            )
-        })?;
-
-        let path_env = platform::search_path(node.parent().map(PathBuf::from));
-
+    pub async fn for_tool(tool: Tool) -> Result<Self, Problem> {
+        let resolved = registry::global()
+            .resolve(tool)
+            .await
+            .ok_or_else(|| registry::missing_problem(tool))?;
         Ok(Self {
-            node,
-            entry,
-            source,
+            tool,
+            bin: resolved.bin,
+            origin: resolved.origin,
             db_path: database_path(),
-            path_env,
         })
     }
 
-    pub fn source(&self) -> Source {
-        self.source
+    pub fn origin(&self) -> Origin {
+        self.origin
     }
 
-    pub fn node_path(&self) -> &PathBuf {
-        &self.node
-    }
-
-    pub fn entry_path(&self) -> &PathBuf {
-        &self.entry
+    pub fn command_line(&self) -> String {
+        self.bin
+            .iter()
+            .map(|part| part.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     pub fn database_path(&self) -> &PathBuf {
@@ -103,12 +83,7 @@ impl Cli {
     }
 
     pub async fn call<T: DeserializeOwned>(&self, args: &[&str]) -> Result<T, Problem> {
-        self.envelope::<T>(args).await?.ok_or_else(|| {
-            Problem::new(
-                ProblemKind::Unreadable,
-                "La respuesta del CLI venía sin datos.",
-            )
-        })
+        self.envelope::<T>(args).await?.ok_or_else(|| self.empty())
     }
 
     pub async fn run(&self, args: &[&str]) -> Result<(), Problem> {
@@ -120,12 +95,7 @@ impl Cli {
         args: &[&str],
     ) -> Result<(T, serde_json::Value), Problem> {
         let (data, meta) = self.envelope_with_meta::<T>(args).await?;
-        let data = data.ok_or_else(|| {
-            Problem::new(
-                ProblemKind::Unreadable,
-                "La respuesta del CLI venía sin datos.",
-            )
-        })?;
+        let data = data.ok_or_else(|| self.empty())?;
         Ok((data, meta))
     }
 
@@ -135,6 +105,13 @@ impl Cli {
         options: CallOptions,
     ) -> Result<(Option<T>, serde_json::Value), Problem> {
         self.run_envelope::<T>(args, options).await
+    }
+
+    fn empty(&self) -> Problem {
+        Problem::new(
+            ProblemKind::Unreadable,
+            format!("La respuesta de {} venía sin datos.", self.tool.name()),
+        )
     }
 
     async fn envelope<T: DeserializeOwned>(&self, args: &[&str]) -> Result<Option<T>, Problem> {
@@ -148,79 +125,71 @@ impl Cli {
         self.run_envelope::<T>(args, CallOptions::default()).await
     }
 
+    fn arguments(&self, args: &[&str]) -> Vec<OsString> {
+        let mut list: Vec<OsString> = args.iter().map(OsString::from).collect();
+        list.push("--json".into());
+        if self.tool == Tool::Bita {
+            list.push("--db-path".into());
+            list.push(self.db_path.clone().into_os_string());
+            if let Some(docs) = env::var_os(DOCS_OVERRIDE_ENV) {
+                list.push("--docs-dir".into());
+                list.push(docs);
+            }
+        }
+        list
+    }
+
     async fn run_envelope<T: DeserializeOwned>(
         &self,
         args: &[&str],
         options: CallOptions,
     ) -> Result<(Option<T>, serde_json::Value), Problem> {
+        let name = self.tool.name();
         let limit = options.timeout.unwrap_or(CALL_TIMEOUT);
-        let mut command = Command::new(&self.node);
-        platform::quiet(&mut command)
-            .arg(&self.entry)
-            .args(args)
-            .arg("--json")
-            .arg("--db-path")
-            .arg(&self.db_path)
-            .current_dir(platform::neutral_dir())
-            .env_clear()
-            .envs(platform::essential_env())
-            .env("PATH", &self.path_env)
-            .env("NO_COLOR", "1")
-            .env("TERM", "dumb")
+        let mut command = registry::command(&self.bin, None).ok_or_else(|| registry::missing_problem(self.tool))?;
+        command
+            .args(self.arguments(args))
             .stdin(if options.stdin.is_some() { Stdio::piped() } else { Stdio::null() })
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true);
-
-        if let Some(docs) = env::var_os(DOCS_OVERRIDE_ENV) {
-            command.arg("--docs-dir").arg(docs);
-        }
-
-        if let Some(home) = node::home() {
-            command.env("HOME", home);
-        }
-        for (key, value) in node::identity() {
-            command.env(key, value);
-        }
+            .stderr(Stdio::piped());
 
         let output = timeout(limit, run_with_input(command, options.stdin))
             .await
             .map_err(|_| {
                 Problem::new(
                     ProblemKind::CliFailed,
-                    format!("El CLI no respondió en {} s.", limit.as_secs()),
+                    format!("{name} no respondió en {} s.", limit.as_secs()),
                 )
             })?
             .map_err(|error| {
                 Problem::new(
                     ProblemKind::CliFailed,
-                    format!("No pude ejecutar el CLI: {error}"),
+                    format!("No pude ejecutar {name}: {error}"),
                 )
             })?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let line = stdout.trim();
-
-        if line.is_empty() {
+        let Some(line) = registry::last_envelope(&stdout) else {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let detail = if stdout.trim().is_empty() { stderr.trim().to_string() } else { stdout.trim().to_string() };
             return Err(Problem::new(
                 ProblemKind::Unreadable,
-                format!("El CLI no devolvió nada: {}", stderr.trim()),
+                format!("{name} no devolvió una respuesta que entienda: {detail}"),
             ));
-        }
+        };
 
-        let envelope: Envelope<T> = serde_json::from_str(line).map_err(|error| {
+        let envelope: Envelope<T> = serde_json::from_value(line).map_err(|error| {
             Problem::new(
                 ProblemKind::Unreadable,
-                format!("No entiendo la respuesta del CLI: {error}"),
+                format!("No entiendo la respuesta de {name}: {error}"),
             )
         })?;
 
-        if envelope.schema_version != SUPPORTED_SCHEMA {
+        if self.tool == Tool::Bita && envelope.schema_version != SUPPORTED_SCHEMA {
             return Err(Problem::new(
                 ProblemKind::SchemaMismatch,
                 format!(
-                    "El CLI habla el esquema {} y esta app entiende el {}.",
+                    "bita habla el esquema {} y esta app entiende el {}.",
                     envelope.schema_version, SUPPORTED_SCHEMA
                 ),
             ));
@@ -235,7 +204,7 @@ impl Cli {
                 .error
                 .unwrap_or_else(|| CliError {
                     code: "UNKNOWN".to_string(),
-                    message: "El CLI falló sin decir por qué.".to_string(),
+                    message: format!("{name} falló sin decir por qué."),
                     hint: None,
                 });
             return Err(
@@ -263,55 +232,11 @@ async fn run_with_input(
     child.wait_with_output().await
 }
 
-pub fn resolve_entry(app: &AppHandle) -> Option<(PathBuf, Source)> {
-    if let Some(explicit) = env::var_os(CLI_OVERRIDE_ENV) {
-        let path = PathBuf::from(explicit);
-        if path.is_file() {
-            if let Some(entry) = script_entry(&path) {
-                return Some((entry, Source::Installed));
-            }
-        }
-    }
-
-    for directory in bin_directories() {
-        let candidate = directory.join("bita");
-        if candidate.exists() {
-            if let Some(entry) = script_entry(&candidate) {
-                return Some((entry, Source::Installed));
-            }
-        }
-    }
-
-    let bundled = app.path().resolve(BUNDLED_ENTRY, BaseDirectory::Resource).ok()?;
-    if bundled.is_file() {
-        return Some((bundled, Source::Bundled));
-    }
-
-    None
-}
-
-fn bin_directories() -> Vec<PathBuf> {
-    let mut directories = Vec::new();
-
-    if let Some(pnpm_home) = env::var_os("PNPM_HOME") {
-        directories.push(PathBuf::from(pnpm_home).join("bin"));
-    }
-
-    if let Some(home) = node::home() {
-        directories.push(home.join("Library/pnpm/bin"));
-        directories.push(home.join(".local/bin"));
-        directories.push(home.join("bin"));
-    }
-
-    directories.extend(platform::package_manager_dirs());
-    directories
-}
-
 fn canonical(path: PathBuf) -> PathBuf {
     fs::canonicalize(&path).unwrap_or(path)
 }
 
-fn script_entry(candidate: &Path) -> Option<PathBuf> {
+pub fn script_entry(candidate: &Path) -> Option<PathBuf> {
     let resolved = canonical(candidate.to_path_buf());
     let text = fs::read_to_string(&resolved).ok()?;
     let first_line = text.lines().next().unwrap_or_default();
@@ -341,24 +266,28 @@ fn shim_targets(text: &str) -> Vec<&str> {
     targets
 }
 
-pub fn version_of(node: &Path, entry: &Path) -> Option<String> {
-    let output = platform::quiet_std(&mut std::process::Command::new(node))
-        .arg(entry)
-        .arg("--version")
-        .current_dir(platform::neutral_dir())
-        .stdin(Stdio::null())
-        .output()
-        .ok()?;
-
-    let text = String::from_utf8_lossy(&output.stdout);
-    let first = text.lines().next()?.trim();
-    if first.is_empty() {
-        return None;
+pub fn docs_root() -> PathBuf {
+    let inkwell = registry::global()
+        .cached_status()
+        .is_some_and(|status| status.docs == Some(registry::DocsProvider::Inkwell));
+    if inkwell {
+        return registry::inkwell_docs_root();
     }
-    Some(first.to_string())
+    bita_docs_root()
 }
 
-pub fn docs_root() -> PathBuf {
+pub fn docs_roots() -> Vec<PathBuf> {
+    let first = docs_root();
+    let mut roots = vec![first.clone()];
+    for other in [bita_docs_root(), registry::inkwell_docs_root()] {
+        if !roots.contains(&other) {
+            roots.push(other);
+        }
+    }
+    roots
+}
+
+pub fn bita_docs_root() -> PathBuf {
     if let Some(explicit) = env::var_os(DOCS_OVERRIDE_ENV) {
         return PathBuf::from(explicit);
     }

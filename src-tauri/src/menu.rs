@@ -14,14 +14,14 @@ pub fn create(_app: &AppHandle) -> tauri::Result<()> {
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let bita = Submenu::with_items(
         app,
-        "bita",
+        "Den",
         true,
         &[
-            &PredefinedMenuItem::about(app, Some("Acerca de bita"), None)?,
+            &PredefinedMenuItem::about(app, Some("Acerca de Den"), None)?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::hide(app, Some("Ocultar bita"))?,
+            &PredefinedMenuItem::hide(app, Some("Ocultar Den"))?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, Some("Salir de bita"))?,
+            &PredefinedMenuItem::quit(app, Some("Salir de Den"))?,
         ],
     )?;
 

@@ -125,7 +125,7 @@ pub fn open(app: &AppHandle, entry_id: Option<i64>) -> tauri::Result<()> {
 fn build(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let (width, height) = initial_size(app, (WIDTH, HEIGHT), (MIN_WIDTH, MIN_HEIGHT));
     let builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::App("notas.html".into()))
-        .title("Notas de bita")
+        .title("Notas · Den")
         .inner_size(width, height)
         .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
         .resizable(true)

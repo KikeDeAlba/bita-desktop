@@ -21,11 +21,11 @@ const MAX_LABEL_CHARS: usize = 12;
 
 const UNNAMED: &str = "sin nombre";
 
-const TOOLTIP: &str = "bita — clic para abrir, clic derecho para salir";
+const TOOLTIP: &str = "Den — clic para abrir, clic derecho para salir";
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, OPEN, "Abrir bita", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, QUIT, "Salir de bita", true, Some("CmdOrCtrl+Q"))?;
+    let open = MenuItem::with_id(app, OPEN, "Abrir Den", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT, "Salir de Den", true, Some("CmdOrCtrl+Q"))?;
     let live = MenuItem::with_id(app, LIVE, "Asistente de reunión", true, None::<&str>)?;
     let wide = MenuItem::with_id(app, LIVE_WIDE, "Ventana amplia", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open, &live, &wide, &PredefinedMenuItem::separator(app)?, &quit])?;

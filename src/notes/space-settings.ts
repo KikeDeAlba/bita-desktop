@@ -27,6 +27,7 @@ export interface SpaceSettingsContext {
   onExpandRail: () => void
   onManageConnections: () => void
   onSaved: () => void
+  available: { atlassian: boolean; meetings: boolean }
 }
 
 type SettingsTab = 'general' | 'atlassian' | 'meetings'
@@ -100,13 +101,13 @@ export function renderSpaceSettings(target: HTMLElement, next: SpaceSettingsCont
     saveFailure = null
     syncFailure = null
     lastResult = null
-    void loadMappings()
+    if (next.available.atlassian) void loadMappings()
   } else if (signature(nextDraft) !== baseline) {
     const dirty = signature(draft) !== baseline
     baseline = signature(nextDraft)
     if (!dirty) draft = nextDraft
   }
-  if (entering || (sites === null && sitesFailure === null)) void loadSites()
+  if (next.available.atlassian && (entering || (sites === null && sitesFailure === null))) void loadSites()
   paint(true)
 }
 
@@ -170,7 +171,9 @@ function build(current: SpaceSettingsContext): HTMLElement {
   const dot = element('span', 'ss-dot')
   dot.style.background = projectColor(current.space.projectId)
   head.append(dot, element('h1', 'ss-title', current.space.projectName ?? 'Sin proyecto'), element('span', 'v2-kbd', 'ajustes del espacio'))
-  scroll.append(head, tabs())
+  const allowed = TABS.filter((item) => item.key === 'general' || current.available[item.key])
+  if (!allowed.some((item) => item.key === tab)) tab = 'general'
+  scroll.append(head, tabs(allowed))
   const body = element('div', 'ss-body')
   if (tab === 'general') body.append(...general(current))
   else if (tab === 'meetings') body.append(...meetings(current))
@@ -199,11 +202,11 @@ function bar(current: SpaceSettingsContext): HTMLElement {
   return row
 }
 
-function tabs(): HTMLElement {
+function tabs(allowed: { key: SettingsTab; label: string }[]): HTMLElement {
   const list = element('div', 'ss-tabs')
   list.setAttribute('role', 'tablist')
   list.setAttribute('aria-label', 'Secciones de ajustes')
-  for (const item of TABS) {
+  for (const item of allowed) {
     const trigger = document.createElement('button')
     trigger.type = 'button'
     trigger.className = 'ss-tab'

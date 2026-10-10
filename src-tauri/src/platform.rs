@@ -70,25 +70,6 @@ pub fn executable(name: &str) -> String {
     }
 }
 
-pub fn executable_names(name: &str) -> Vec<String> {
-    if cfg!(windows) {
-        ["exe", "cmd", "bat"].iter().map(|extension| format!("{name}.{extension}")).collect()
-    } else {
-        vec![name.to_string()]
-    }
-}
-
-pub fn find_in<I>(directories: I, name: &str) -> Option<PathBuf>
-where
-    I: IntoIterator<Item = PathBuf>,
-{
-    let names = executable_names(name);
-    directories
-        .into_iter()
-        .flat_map(|directory| names.iter().map(move |file| directory.join(file)).collect::<Vec<_>>())
-        .find(|candidate| candidate.is_file())
-}
-
 pub fn on_path(file: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH")?;
     env::split_paths(&path)
@@ -141,10 +122,6 @@ where
     join_dirs(first.into_iter().chain(system_dirs()))
 }
 
-pub fn base_path() -> OsString {
-    search_path(Vec::new())
-}
-
 fn join_dirs<I>(directories: I) -> OsString
 where
     I: IntoIterator<Item = PathBuf>,
@@ -180,15 +157,6 @@ pub fn neutral_dir() -> PathBuf {
 pub fn quiet(command: &mut tokio::process::Command) -> &mut tokio::process::Command {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
-    command
-}
-
-pub fn quiet_std(command: &mut std::process::Command) -> &mut std::process::Command {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
     command
 }
 
@@ -348,16 +316,6 @@ pub fn node_locations(home: Option<&Path>) -> Vec<PathBuf> {
     found
 }
 
-pub fn node_install_hint() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "brew install node"
-    } else if cfg!(windows) {
-        "winget install OpenJS.NodeJS.LTS"
-    } else {
-        "https://nodejs.org"
-    }
-}
-
 pub fn file_manager_name() -> &'static str {
     if cfg!(target_os = "macos") {
         "Finder"
@@ -379,7 +337,7 @@ mod tests {
 
     use std::path::Path;
 
-    use super::{executable, executable_names, home_from, join_dirs, launches_on_open, search_path, simplified_text, system_dirs};
+    use super::{executable, home_from, join_dirs, launches_on_open, search_path, simplified_text, system_dirs};
 
     #[test]
     fn home_prefers_home_and_falls_back_to_the_user_profile() {
@@ -392,10 +350,8 @@ mod tests {
     fn executables_carry_the_platform_extension() {
         if cfg!(windows) {
             assert_eq!(executable("node"), "node.exe");
-            assert_eq!(executable_names("bita"), vec!["bita.exe", "bita.cmd", "bita.bat"]);
         } else {
             assert_eq!(executable("node"), "node");
-            assert_eq!(executable_names("bita"), vec!["bita"]);
         }
     }
 

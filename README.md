@@ -1,23 +1,73 @@
-# bita-desktop
+# Den
 
-`bita` en la barra de menús de macOS: el tiempo que llevas corriendo, visible sin
-abrir nada, y los cronómetros a un clic.
+**Den** (madriguera) es la app de escritorio que junta las herramientas
+`@kikedealba` en la barra de menús: el tiempo de **bita**, las páginas de
+**inkwell**, las conexiones de **atl** y las reuniones de **recap**. El icono es
+el mapache.
 
-No sustituye al CLI, lo usa. Todo lo que ves aquí sale de `bita … --json`, así
-que agrupar, redondear estimaciones y detectar solapes ocurre en un solo sitio y
-no hay dos versiones de la verdad.
+Den no trae ninguna de ellas dentro ni depende de su código. Las encuentra en el
+registro de `@kikedealba/kit` cuando están instaladas, les habla por su CLI con
+`--json` y enciende solo los módulos de las que responden. Si falta una, su
+parte desaparece y en Ajustes aparece una tarjeta con el comando para
+instalarla.
+
+| Herramienta | Qué enciende en Den |
+|---|---|
+| `bita` | Las pestañas Ahora, Hoy, Jira y Repos, y el arranque de cronómetros |
+| `inkwell` | La ventana de notas, el backlog y el historial de las páginas; si no está, se usa `bita docs` |
+| `atl` | Las conexiones con Jira y Confluence; si no está, las de `bita atlassian` |
+| `recap` | Reuniones, el asistente en vivo, los tipos de reunión del lanzador y las grabaciones en Almacenamiento |
 
 ## Requisitos
 
-**Node 24 o superior.** Es lo único que la app no puede resolver sola: el CLI de
-bita corre `.ts` sin compilar y necesita `node:sqlite`.
+Las herramientas que quieras usar, instaladas con su `setup`, que es el que las
+deja en el registro:
 
 ```sh
-node -v    # debe decir v24 o más
+npm i -g @kikedealba/bita && bita setup
+npm i -g @kikedealba/inkwell && inkwell setup
+npm i -g @kikedealba/atl && atl setup
+npm i -g @kikedealba/recap && recap setup
 ```
 
-**El CLI no hace falta tenerlo instalado.** La app trae una copia dentro y
-arranca con ella. Si lo tienes instalado, usa el tuyo.
+Cada manifiesto puede traer su propia pista de instalación (`install`); Den la
+prefiere sobre la de arriba.
+
+## Cómo encuentra las herramientas
+
+Lee el mismo directorio que `kit`:
+
+| Sistema | Registro |
+|---|---|
+| macOS / Linux | `${XDG_CONFIG_HOME:-~/.config}/kikedealba/tools.d/<herramienta>.json` |
+| Windows | `%APPDATA%\kikedealba\tools.d\<herramienta>.json` |
+
+`KIT_REGISTRY_DIR` lo cambia. De cada manifiesto usa `bin`, la línea de comando
+completa con rutas absolutas, así que no depende del `PATH`. Un manifiesto cuyo
+ejecutable ya no existe cuenta como roto, y uno que no es válido se lista en
+Ajustes con sus problemas.
+
+Al arrancar le pregunta a cada una `capabilities --json` y guarda la respuesta
+durante la sesión. Los módulos se deciden por capacidad, no por versión ni por
+el texto de un error: el backlog pide `docs.backlog` a inkwell, el historial
+`docs.history`, la sincronización `docs.confluence.sync`. Una herramienta
+registrada que no contesta queda apagada hasta que vuelva a responder.
+
+Las páginas, el backlog y Confluence van a inkwell cuando está instalado y
+`inkwell migrate status --json` dice `migrated: true`; si no, a `bita docs …`.
+La traducción es quitar el prefijo `docs` (`bita docs page history 4` →
+`inkwell page history 4`). Las notas de cada entrada (`docs ls`, `docs show`)
+siguen con bita mientras esté instalado.
+
+El directorio `tools.d` se vigila: instalar o quitar una herramienta enciende o
+apaga sus módulos sin reiniciar. «Volver a buscar» en Ajustes fuerza la
+relectura.
+
+Para ver lo que Den decide sin abrir la ventana:
+
+```sh
+src-tauri/target/debug/den --tools-status
+```
 
 ## Instalación
 
@@ -39,24 +89,17 @@ Reinicia la terminal después de instalar Rust.
 ### 2. Clonar
 
 ```sh
-git clone --recurse-submodules git@github.com:KikeDeAlba/bita-desktop.git
+git clone git@github.com:KikeDeAlba/bita-desktop.git
 cd bita-desktop
 pnpm install
-```
-
-El `--recurse-submodules` importa: `vendor/bita` es el CLI que viaja dentro de la
-app. Si ya clonaste sin él:
-
-```sh
-git submodule update --init --depth 1
 ```
 
 ### 3. Compilar
 
 ```sh
 pnpm tauri build --bundles app
-cp -R src-tauri/target/release/bundle/macos/bita.app /Applications/
-open /Applications/bita.app
+cp -R src-tauri/target/release/bundle/macos/Den.app /Applications/
+open /Applications/Den.app
 ```
 
 La primera compilación baja y construye unos 500 crates: entre cinco y quince
@@ -67,7 +110,16 @@ al moverlo. No está notarizado, así que en otro Mac habrá que abrirlo la prim
 vez desde Ajustes → Privacidad y seguridad.
 
 No hay icono en el Dock ni ventana: vive en la barra de arriba. Para cerrarlo,
-clic derecho en el icono → **Salir de bita**.
+clic derecho en el icono → **Salir de Den**.
+
+### Si venías de bita-desktop
+
+El identificador cambió de `com.kikedealba.bita-desktop` a
+`com.kikedealba.den`. En el primer arranque Den copia `live.json` (los ajustes
+del asistente y el atajo) desde la carpeta vieja si en la nueva todavía no
+existe. La vieja no se toca. Lo que la ventana de notas guarda en el
+navegador (anchos de los carriles, tamaño del texto, el último espacio) vive en
+el almacén del identificador viejo y empieza de cero.
 
 ## Qué hace
 
@@ -120,16 +172,18 @@ Los documentos van aparte porque la ventana de notas también lee de ahí.
 
 | Variable | Para qué |
 |---|---|
+| `KIT_REGISTRY_DIR` | Leer otro registro de herramientas, por ejemplo uno de prueba |
+| `BITA_CLI`, `INKWELL_CLI`, `ATL_CLI`, `RECAP_CLI` | Usar ese ejecutable o script en vez del registrado; un `.ts`/`.js` se corre con node |
 | `BITA_DB_PATH` | Usar otra base de datos |
-| `BITA_NODE` | Forzar un binario de node concreto |
-| `BITA_CLI` | Forzar un CLI concreto en vez de buscarlo |
+| `BITA_NODE` | Forzar un binario de node concreto para los scripts de las variables de arriba |
+| `INKWELL_DB_PATH`, `INKWELL_DOCS_DIR` | Usar otra base o directorio de inkwell; también los vigila Den |
 | `BITA_DOCS_DIR` | Usar otro directorio de documentos; se le pasa al CLI como `--docs-dir` |
 | `BITA_KEEP_PANEL` | Abre el panel al arrancar y evita que se esconda al perder el foco, para poder usar las devtools |
 | `BITA_NO_OPEN_NOTES` | No abre la ventana de documentación al arrancar; deja solo el icono del tray |
 | `BITA_KEEP_ACCESSORY` | No cambia la activation policy al abrir las notas: sin icono en el Dock ni barra de menús |
 | `BITA_EDITOR` | Qué binario abre un `.md` en vez de dejárselo a `open` |
 
-## Cómo habla con el CLI
+## Cómo habla con las herramientas
 
 Un subproceso por consulta, siempre con `--json`, y una sola línea de stdout que
 se parsea entera:
@@ -139,23 +193,23 @@ se parsea entera:
 ```
 
 El error se detecta por `ok: false`, nunca por el código de salida. stderr es
-diagnóstico y se ignora.
+diagnóstico y se ignora. Con bita además se exige `schemaVersion` 3, que es el
+modelo que entiende la app.
 
-Tres decisiones que no son obvias y que están ahí a propósito:
+Cada subproceso arranca con el entorno limpio: `PATH` con la carpeta del
+ejecutable registrado y las del sistema, `HOME`, el usuario, y solo las
+variables `KIT_*`, `XDG_*`, `BITA_*`, `INKWELL_*`, `RECAP_*` y `ATL_*` (más las
+de carpetas de Windows). Así las herramientas leen el mismo registro y las
+mismas rutas que Den.
 
-**El reloj no se le pide al CLI.** Se lee `started_at` una vez y la cuenta la
+**El reloj no se le pide a bita.** Se lee `started_at` una vez y la cuenta la
 lleva Rust contra el reloj de pared, que sobrevive a que el Mac se duerma. Tiene
 que ser así de todas formas: macOS congela los timers de JavaScript cuando la
 ventana está oculta, y el título de la barra tiene que seguir avanzando.
 
 **Los subprocesos corren desde `/`.** Desde un repositorio git que no resuelve a
-ningún proyecto, el CLI devuelve `REPO_NOT_MAPPED`; desde `/` no hay repo, así
-que devuelve «sin proyecto» y el cronómetro en blanco es legal.
-
-**node se busca, no se hereda.** Una app lanzada desde Finder recibe
-`/usr/bin:/bin:/usr/sbin:/sbin` y nada más, así que un node de nvm o fnm es
-invisible. Se sondean las rutas conocidas, de la versión más nueva a la más
-vieja, y a cada candidato se le pregunta su propia versión.
+ningún proyecto, bita devuelve `REPO_NOT_MAPPED`; desde `/` no hay repo, así que
+devuelve «sin proyecto» y el cronómetro en blanco es legal.
 
 ## Cómo se entera de los cambios
 
@@ -172,6 +226,9 @@ deja el fichero intacto y toda escritura hace checkpoint al cerrar y mueve el
 
 Como red de seguridad hay además un sondeo cada treinta segundos, porque FSEvents
 pierde eventos cuando el equipo se suspende.
+
+Con inkwell instalado se vigilan también su base (`inkwell.db`) y su directorio
+de documentos, con las mismas reglas.
 
 Los `.md` necesitan su propio vigilante. El de la base mira `dirname(db)` sin
 recursión y descarta toda tanda que no mueva el fingerprint de `bita.db`; los
@@ -306,8 +363,19 @@ pegado al borde derecho no empuje el panel fuera.
 ```
 src/            el panel: TypeScript, sin framework
 src/notes/      la ventana de notas: carril, lector, markdown
-src-tauri/      el backend: tray, estado, subprocesos, vigilancia
-vendor/bita/    el CLI, como submódulo fijado
+src-tauri/      el backend: tray, estado, registro, subprocesos, vigilancia
+```
+
+## Pruebas de contrato
+
+`src-tauri/tests/cli_contract.rs` corre contra las herramientas que haya en un
+registro de prueba, nunca contra el real: sin `KIT_REGISTRY_DIR` se saltan.
+Cada herramienta registrada tiene que contestar `capabilities --json`, y bita e
+inkwell además el contrato de datos que pinta la app, cada una con su base en
+una carpeta temporal.
+
+```sh
+KIT_REGISTRY_DIR=/tmp/den-registry cargo test --test cli_contract
 ```
 
 ## Lo que falta

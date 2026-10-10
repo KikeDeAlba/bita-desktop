@@ -2,18 +2,17 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
-use crate::cli::Source;
 use crate::doctor::{self, Report};
+use crate::registry::Origin;
 use crate::model::{Problem, ProblemKind, Scope, SummaryData, SummaryMeta, SummaryView, Snapshot};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CliInfo {
-    pub node: String,
-    pub entry: String,
+    pub command: String,
     pub database: String,
-    pub bundled: bool,
+    pub from_environment: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -38,10 +37,9 @@ pub fn snapshot(state: State<'_, AppState>) -> Snapshot {
 #[tauri::command]
 pub fn cli_info(state: State<'_, AppState>) -> Option<CliInfo> {
     state.describe_cli().map(|cli| CliInfo {
-        node: cli.node_path().display().to_string(),
-        entry: cli.entry_path().display().to_string(),
+        command: cli.command_line(),
         database: cli.database_path().display().to_string(),
-        bundled: cli.source() == Source::Bundled,
+        from_environment: cli.origin() == Origin::Override,
     })
 }
 
@@ -193,17 +191,8 @@ pub async fn unset_scope(app: AppHandle, prefix: String) -> Result<Vec<Scope>, P
 }
 
 #[tauri::command]
-pub async fn doctor_report(app: AppHandle) -> Result<Report, Problem> {
-    Ok(doctor::report(&app).await)
-}
-
-#[tauri::command]
-pub async fn install_cli(app: AppHandle) -> Result<String, Problem> {
-    let log = doctor::install(&app).await?;
-    app.state::<AppState>().forget_cli();
-    let state = app.state::<AppState>();
-    state.refresh(&app).await;
-    Ok(log)
+pub async fn doctor_report() -> Result<Report, Problem> {
+    Ok(doctor::report().await)
 }
 
 #[tauri::command]
