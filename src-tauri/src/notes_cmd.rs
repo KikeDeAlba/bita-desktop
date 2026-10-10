@@ -381,12 +381,12 @@ pub fn copy_text(app: AppHandle, text: String) -> Result<(), Problem> {
 
 fn relative_inside(rel_path: &str) -> Result<&Path, &'static str> {
     let candidate = Path::new(rel_path);
-    if candidate.is_absolute() {
+    if candidate.is_absolute() || candidate.has_root() {
         return Err("la ruta es absoluta");
     }
     if candidate
         .components()
-        .any(|part| matches!(part, Component::ParentDir | Component::Prefix(_)))
+        .any(|part| matches!(part, Component::ParentDir | Component::Prefix(_) | Component::RootDir))
     {
         return Err("la ruta sale del directorio");
     }
