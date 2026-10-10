@@ -71,7 +71,8 @@ export interface Project {
 
 export interface JiraProject {
   projectId: number
-  jiraProjectKey: string
+  jiraProjectKey: string | null
+  jira: boolean
 }
 
 export function jiraProjects(): Promise<JiraProject[]> {
@@ -79,7 +80,13 @@ export function jiraProjects(): Promise<JiraProject[]> {
 }
 
 export function jiraKeyMap(list: JiraProject[]): Map<number, string> {
-  return new Map(list.map((row) => [row.projectId, row.jiraProjectKey]))
+  return new Map(
+    list.filter((row) => row.jiraProjectKey !== null).map((row) => [row.projectId, row.jiraProjectKey as string]),
+  )
+}
+
+export function noJiraSet(list: JiraProject[]): Set<number> {
+  return new Set(list.filter((row) => !row.jira).map((row) => row.projectId))
 }
 
 export function snapshot(): Promise<Snapshot> {

@@ -74,7 +74,9 @@ espacios ni la puntuación final), con la duración de cada bloque, los que est�
 corriendo incluidos, y avisa de los días con cronómetros solapados. La pestaña
 **Jira** es `tally summary --pending --json`: los grupos, la estimación y lo que
 queda fuera de Jira los decide tally, y la clave de Jira de cada proyecto (en
-Repos y en los ajustes del espacio) sale de `tally map list --json`. Den lee
+Repos y en los ajustes del espacio) sale de `tally map list --json`, igual que
+la etiqueta «sin Jira» de Repos (`jira: false` en esa lista). Sin tally no hay
+etiqueta. Den lee
 igual los proyectos y las entradas de bita 0.18 y de bita 1.0, que ya no traen
 `registered`, `issueKey` ni los datos de Jira. Las notas de cada cronómetro son
 `inkwell note ls|show|search`.
