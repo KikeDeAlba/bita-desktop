@@ -175,7 +175,7 @@ pub struct NonJira {
     pub projects: Vec<NonJiraProject>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Overlap {
     pub local_day: String,

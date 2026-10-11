@@ -20,6 +20,7 @@ mod platform;
 mod proposals;
 mod recap;
 mod registry;
+mod report;
 mod reports;
 #[cfg(target_os = "macos")]
 mod screen;
@@ -68,6 +69,7 @@ fn main() {
             commands::amend_timer,
             commands::worked,
             commands::pending,
+            report::report,
             commands::scopes,
             commands::add_project,
             commands::set_scope,
