@@ -253,6 +253,16 @@ pub fn open_notes(app: AppHandle, entry_id: Option<i64>) -> Result<(), Problem> 
 }
 
 #[tauri::command]
+pub fn open_reports(app: AppHandle) -> Result<(), Problem> {
+    crate::reports::open(&app).map_err(|error| {
+        Problem::new(
+            ProblemKind::Unreadable,
+            format!("No pude abrir la ventana de reportes: {error}"),
+        )
+    })
+}
+
+#[tauri::command]
 pub fn notes_take_focus(app: AppHandle) -> Option<i64> {
     crate::notes::take_focus(&app)
 }
