@@ -70,6 +70,15 @@ export interface ExcludesState {
   status: string | null
 }
 
+export interface CoworkerExportState {
+  open: boolean
+  format: ExportFormat
+  pay: boolean
+  withoutEstimate: boolean
+  busy: boolean
+  status: { text: string; error: boolean } | null
+}
+
 export interface CoworkerState {
   form: CoworkerForm
   loading: boolean
@@ -78,6 +87,8 @@ export interface CoworkerState {
   invalid: string | null
   stale: boolean
   result: CoworkerOvertime | null
+  range: { from: string; to: string } | null
+  exporting: CoworkerExportState
   candidates: CoworkerCandidate[] | null
   sites: JiraSiteOption[]
   sitesLoaded: boolean
