@@ -392,7 +392,7 @@ fn log_a_past_block(sandbox: &Sandbox) {
 #[test]
 fn bita_reports_the_time_per_project_the_reports_window_draws() {
     let Some(sandbox) = Sandbox::new(&["bita"], "report") else { return };
-    if lacks_command(&sandbox.run("bita", &["report", "today"])) {
+    if !sandbox.declares("bita", "time.report.read") && lacks_command(&sandbox.run("bita", &["report", "today"])) {
         eprintln!("skipped: this bita has no report command");
         return;
     }
@@ -424,7 +424,7 @@ fn bita_reports_the_time_per_project_the_reports_window_draws() {
     for entry in data["entries"].as_array().expect("entries") {
         has_fields(
             entry,
-            &["id", "title", "projectId", "start", "stop", "localDay", "seconds", "kind", "overlapping"],
+            &["id", "title", "projectId", "start", "stop", "localDay", "seconds", "kind", "overlapping", "blockIds"],
             "report entries",
         );
     }
@@ -433,13 +433,13 @@ fn bita_reports_the_time_per_project_the_reports_window_draws() {
 #[test]
 fn tally_reports_the_jira_status_the_reports_window_merges() {
     let Some(sandbox) = Sandbox::new(&["bita", "tally"], "status") else { return };
-    if lacks_command(&sandbox.run("tally", &["status", "today"])) {
+    if !sandbox.declares("tally", "timesheet.status") && lacks_command(&sandbox.run("tally", &["status", "today"])) {
         eprintln!("skipped: this tally has no status command");
         return;
     }
     log_a_past_block(&sandbox);
 
-    let status = sandbox.run("tally", &["status", "--from", REPORT_FROM, "--to", REPORT_TO, "--entries"]);
+    let status = sandbox.run("tally", &["status", "--from", REPORT_FROM, "--to", REPORT_TO, "--entries", "--include-running"]);
     assert_eq!(status["ok"].as_bool(), Some(true), "{status}");
     let data = &status["data"];
     has_fields(data, &["projects", "totals", "entries"], "tally status");
@@ -458,6 +458,6 @@ fn tally_reports_the_jira_status_the_reports_window_merges() {
         );
     }
     for entry in data["entries"].as_array().expect("entries") {
-        has_fields(entry, &["entryId", "registered", "issueKey", "jira", "excludedReason"], "tally status entries");
+        has_fields(entry, &["entryId", "registered", "issueKey", "jira", "excludedReason", "projectId", "localDay", "seconds"], "tally status entries");
     }
 }

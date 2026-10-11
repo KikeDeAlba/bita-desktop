@@ -223,6 +223,7 @@ export interface ReportProject {
   jira: boolean
   registeredSeconds: number
   pendingSeconds: number
+  excludedSeconds: number
 }
 
 export interface ProjectSeconds {
@@ -253,6 +254,7 @@ export interface ReportEntry {
   seconds: number
   kind: string | null
   overlapping: boolean
+  blockIds: number[]
   color: string
   registered: boolean | null
   issueKey: string | null

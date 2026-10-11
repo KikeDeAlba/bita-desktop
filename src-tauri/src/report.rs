@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::cli::{CallOptions, Cli};
 use crate::docs::Feature;
 use crate::model::{Overlap, Problem, ProblemKind};
-use crate::registry::Tool;
+use crate::registry::{Tool, ToolsStatus};
 
 const REPORT_TIMEOUT_SECONDS: u64 = 60;
 const UPGRADE_BITA: &str = "Actualiza bita a 1.2 para ver reportes";
+const UPGRADE_TALLY: &str = "Actualiza tally a 0.3 para ver el estado en Jira";
 const PROJECT_COLORS: [&str; 5] = [
     "var(--aqua)",
     "var(--blue)",
@@ -18,6 +19,10 @@ const PROJECT_COLORS: [&str; 5] = [
     "var(--estimate)",
 ];
 const NO_PROJECT_COLOR: &str = "var(--fg-faint)";
+const BITA_NO_PROJECT: &str = "(no project)";
+const NO_PROJECT_NAME: &str = "Sin proyecto";
+const REPORT_CAPABILITY: &str = "time.report.read";
+const STATUS_CAPABILITY: &str = "timesheet.status";
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,6 +92,8 @@ pub struct BitaReportEntry {
     pub kind: Option<String>,
     #[serde(default)]
     pub overlapping: bool,
+    #[serde(default)]
+    pub block_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -153,6 +160,12 @@ pub struct TallyEntry {
     pub jira: bool,
     #[serde(default)]
     pub excluded_reason: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<i64>,
+    #[serde(default)]
+    pub local_day: Option<String>,
+    #[serde(default)]
+    pub seconds: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -178,6 +191,7 @@ pub struct ReportProject {
     pub jira: bool,
     pub registered_seconds: i64,
     pub pending_seconds: i64,
+    pub excluded_seconds: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -192,6 +206,7 @@ pub struct ReportEntry {
     pub seconds: i64,
     pub kind: Option<String>,
     pub overlapping: bool,
+    pub block_ids: Vec<i64>,
     pub color: String,
     pub registered: Option<bool>,
     pub issue_key: Option<String>,
@@ -238,7 +253,10 @@ pub fn merge(report: BitaReport, status: Option<TallyStatus>) -> ReportView {
         .flat_map(|status| status.projects.iter())
         .map(|project| (project.project_id, project))
         .collect();
-    let by_entry = reliable_entries(&report, status.as_ref());
+    let mut by_block: HashMap<i64, Vec<&TallyEntry>> = HashMap::new();
+    for entry in status.iter().flat_map(|status| status.entries.iter().flatten()) {
+        by_block.entry(entry.entry_id).or_default().push(entry);
+    }
     let jira_available = status.is_some();
 
     let projects = report
@@ -251,8 +269,9 @@ pub fn merge(report: BitaReport, status: Option<TallyStatus>) -> ReportView {
                 jira: tally.is_some_and(|found| found.jira),
                 registered_seconds: tally.map_or(0, |found| found.registered_seconds),
                 pending_seconds: tally.map_or(0, |found| found.pending_seconds),
+                excluded_seconds: tally.map_or(0, |found| found.excluded_seconds),
                 project_id: project.project_id,
-                name: project.name,
+                name: project_name(project.project_id, project.name),
                 client_name: project.client_name,
                 total_seconds: project.total_seconds,
                 entry_count: project.entry_count,
@@ -264,13 +283,19 @@ pub fn merge(report: BitaReport, status: Option<TallyStatus>) -> ReportView {
         entries
             .into_iter()
             .map(|entry| {
-                let tally = by_entry.get(&entry.id);
+                let rows: Vec<&TallyEntry> = entry
+                    .block_ids
+                    .iter()
+                    .flat_map(|block| by_block.get(block).into_iter().flatten().copied())
+                    .collect();
+                let known = !rows.is_empty();
                 ReportEntry {
                     color: project_color(entry.project_id).to_string(),
-                    registered: tally.map(|found| found.registered),
-                    issue_key: tally.and_then(|found| found.issue_key.clone()),
-                    jira: tally.map(|found| found.jira),
-                    excluded_reason: tally.and_then(|found| found.excluded_reason.clone()),
+                    registered: known.then(|| rows.iter().all(|row| row.registered)),
+                    issue_key: shared(rows.iter().map(|row| row.issue_key.as_deref())),
+                    jira: known.then(|| rows.iter().any(|row| row.jira)),
+                    excluded_reason: shared(rows.iter().map(|row| row.excluded_reason.as_deref())),
+                    block_ids: entry.block_ids,
                     id: entry.id,
                     title: entry.title,
                     project_id: entry.project_id,
@@ -301,26 +326,45 @@ pub fn merge(report: BitaReport, status: Option<TallyStatus>) -> ReportView {
     }
 }
 
-fn reliable_entries<'a>(report: &BitaReport, status: Option<&'a TallyStatus>) -> HashMap<i64, &'a TallyEntry> {
-    let mut seen: HashMap<i64, usize> = HashMap::new();
-    for entry in report.entries.iter().flatten() {
-        *seen.entry(entry.id).or_default() += 1;
+fn project_name(project_id: Option<i64>, name: String) -> String {
+    if project_id.is_none() && (name.trim().is_empty() || name == BITA_NO_PROJECT) {
+        return NO_PROJECT_NAME.to_string();
     }
-    let mut reported: HashMap<i64, Vec<&TallyEntry>> = HashMap::new();
-    for entry in status.and_then(|status| status.entries.as_ref()).into_iter().flatten() {
-        reported.entry(entry.entry_id).or_default().push(entry);
+    name
+}
+
+fn shared<'a>(mut values: impl Iterator<Item = Option<&'a str>>) -> Option<String> {
+    let first = values.next()??;
+    values.all(|value| value == Some(first)).then(|| first.to_string())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Support {
+    Yes,
+    No,
+    Unknown,
+}
+
+pub fn support(capabilities: &[String], verified: bool, capability: &str) -> Support {
+    if capabilities.iter().any(|item| item == capability) {
+        Support::Yes
+    } else if verified {
+        Support::No
+    } else {
+        Support::Unknown
     }
-    reported
-        .into_iter()
-        .filter(|(id, rows)| rows.len() == 1 && seen.get(id) == Some(&1))
-        .map(|(id, rows)| (id, rows[0]))
-        .collect()
+}
+
+fn upgrade_bita() -> Problem {
+    Problem::new(ProblemKind::CliTooOld, UPGRADE_BITA).with_hint(Some(Tool::Bita.default_install()))
 }
 
 pub fn tally_outcome(result: Result<Option<TallyStatus>, Problem>) -> (Option<TallyStatus>, Option<String>) {
     match result {
         Ok(status) => (status, None),
-        Err(problem) if problem.kind == ProblemKind::CliFailed && is_unknown_command(&problem) => (None, None),
+        Err(problem) if problem.kind == ProblemKind::CliFailed && is_unknown_command(&problem) => {
+            (None, Some(UPGRADE_TALLY.to_string()))
+        }
         Err(problem) => (None, Some(problem.message)),
     }
 }
@@ -373,6 +417,7 @@ pub fn bita_args(request: &ReportRequest) -> Result<Vec<String>, Problem> {
 pub fn tally_args(request: &ReportRequest) -> Result<Vec<String>, Problem> {
     let mut args = vec!["status".to_string()];
     args.extend(range_args(request)?);
+    args.push("--include-running".to_string());
     Ok(args)
 }
 
@@ -384,7 +429,7 @@ pub fn is_unknown_command(problem: &Problem) -> bool {
 
 pub fn bita_problem(problem: Problem) -> Problem {
     if problem.kind == ProblemKind::CliFailed && is_unknown_command(&problem) {
-        return Problem::new(ProblemKind::CliTooOld, UPGRADE_BITA).with_hint(Some(Tool::Bita.default_install()));
+        return upgrade_bita();
     }
     problem
 }
@@ -399,14 +444,26 @@ async fn call<T: serde::de::DeserializeOwned>(tool: Tool, cli: &Cli, args: &[Str
     })
 }
 
-async fn bita_report(args: &[String]) -> Result<BitaReport, Problem> {
+fn tool_support(status: &ToolsStatus, tool: Tool, capability: &str) -> Support {
+    status
+        .tool(tool)
+        .map_or(Support::Unknown, |found| support(&found.capabilities, found.verified, capability))
+}
+
+async fn bita_report(status: &ToolsStatus, args: &[String]) -> Result<BitaReport, Problem> {
+    if tool_support(status, Tool::Bita, REPORT_CAPABILITY) == Support::No {
+        return Err(upgrade_bita());
+    }
     let cli = Cli::for_tool(Tool::Bita).await?;
     call::<BitaReport>(Tool::Bita, &cli, args).await.map_err(bita_problem)
 }
 
-async fn tally_status(args: &[String]) -> Result<Option<TallyStatus>, Problem> {
-    if crate::docs::require(Feature::Jira).await.is_err() {
+async fn tally_status(status: &ToolsStatus, args: &[String]) -> Result<Option<TallyStatus>, Problem> {
+    if crate::docs::refusal(Feature::Jira, status).is_some() {
         return Ok(None);
+    }
+    if tool_support(status, Tool::Tally, STATUS_CAPABILITY) == Support::No {
+        return Err(Problem::new(ProblemKind::CliTooOld, UPGRADE_TALLY));
     }
     let Ok(cli) = Cli::for_tool(Tool::Tally).await else { return Ok(None) };
     call::<TallyStatus>(Tool::Tally, &cli, args).await.map(Some)
@@ -423,7 +480,9 @@ pub async fn report(
     let request = ReportRequest { preset, from, to, project_id, entries };
     let bita = bita_args(&request)?;
     let tally = tally_args(&request)?;
-    let (report, status) = tokio::try_join!(bita_report(&bita), async { Ok(tally_status(&tally).await) })?;
+    let tools = crate::registry::global().status().await;
+    let (report, status) =
+        tokio::try_join!(bita_report(&tools, &bita), async { Ok(tally_status(&tools, &tally).await) })?;
     let (status, jira_problem) = tally_outcome(status);
     let mut view = merge(report, status);
     view.jira_problem = jira_problem;
@@ -442,7 +501,7 @@ mod tests {
         "projects": [
             {"projectId": 7, "name": "Contrato", "clientName": "Solemti", "totalSeconds": 9000, "entryCount": 2},
             {"projectId": 3, "name": "Interno", "clientName": null, "totalSeconds": 2700, "entryCount": 1},
-            {"projectId": null, "name": "Sin proyecto", "clientName": null, "totalSeconds": 900, "entryCount": 1}
+            {"projectId": null, "name": "(no project)", "clientName": null, "totalSeconds": 900, "entryCount": 1}
         ],
         "days": [
             {"day": "2026-10-05", "totalSeconds": 10800, "projects": [{"projectId": 7, "seconds": 9000}, {"projectId": null, "seconds": 900}, {"projectId": 3, "seconds": 900}]},
@@ -458,20 +517,22 @@ mod tests {
     }"#;
 
     const BITA_ENTRIES: &str = r#"[
-        {"id": 11, "title": "Rotar el secreto", "projectId": 7, "start": "2026-10-05T15:00:00.000Z", "stop": "2026-10-05T17:30:00.000Z", "localDay": "2026-10-05", "seconds": 9000, "kind": "work", "overlapping": true},
-        {"id": 12, "title": "Junta", "projectId": null, "start": "2026-10-05T16:00:00.000Z", "stop": null, "localDay": "2026-10-05", "seconds": 900, "kind": null, "overlapping": false}
+        {"id": 11, "title": "Rotar el secreto", "projectId": 7, "start": "2026-10-05T15:00:00.000Z", "stop": "2026-10-05T17:30:00.000Z", "localDay": "2026-10-05", "seconds": 9000, "kind": "work", "overlapping": true, "blockIds": [11, 14]},
+        {"id": 12, "title": "Junta", "projectId": null, "start": "2026-10-05T16:00:00.000Z", "stop": null, "localDay": "2026-10-05", "seconds": 900, "kind": null, "overlapping": false, "blockIds": [12]}
     ]"#;
 
     const TALLY_STATUS: &str = r#"{
         "projects": [
             {"projectId": 7, "name": "Contrato", "jira": true, "registeredSeconds": 5400, "pendingSeconds": 3600, "excludedSeconds": 0, "nonJiraSeconds": 0},
-            {"projectId": 3, "name": "Interno", "jira": false, "registeredSeconds": 0, "pendingSeconds": 0, "excludedSeconds": 0, "nonJiraSeconds": 2700}
+            {"projectId": 3, "name": "Interno", "jira": false, "registeredSeconds": 0, "pendingSeconds": 0, "excludedSeconds": 600, "nonJiraSeconds": 2100}
         ],
         "totals": {"registeredSeconds": 5400, "pendingSeconds": 3600, "excludedSeconds": 0, "nonJiraSeconds": 3600}
     }"#;
 
     const TALLY_ENTRIES: &str = r#"[
-        {"entryId": 11, "registered": true, "issueKey": "PP-1", "jira": true, "excludedReason": null}
+        {"entryId": 11, "registered": true, "issueKey": "PP-1", "jira": true, "excludedReason": null, "projectId": 7, "localDay": "2026-10-05", "seconds": 5400},
+        {"entryId": 14, "registered": true, "issueKey": "PP-1", "jira": true, "excludedReason": null, "projectId": 7, "localDay": "2026-10-05", "seconds": 3600},
+        {"entryId": 12, "registered": false, "issueKey": null, "jira": false, "excludedReason": "running", "projectId": null, "localDay": "2026-10-05", "seconds": 900}
     ]"#;
 
     fn bita(with_entries: bool) -> BitaReport {
@@ -541,13 +602,16 @@ mod tests {
         assert!(contract.jira);
         assert_eq!(contract.registered_seconds, 5400);
         assert_eq!(contract.pending_seconds, 3600);
+        assert_eq!(contract.excluded_seconds, 0);
 
         let internal = &view.projects[1];
+        assert_eq!(internal.excluded_seconds, 600);
         assert_eq!(internal.color, "var(--ok)");
         assert!(!internal.jira);
 
         let loose = &view.projects[2];
         assert_eq!(loose.project_id, None);
+        assert_eq!(loose.name, "Sin proyecto");
         assert_eq!(loose.color, "var(--fg-faint)");
         assert!(!loose.jira);
         assert_eq!(loose.pending_seconds, 0);
@@ -573,44 +637,82 @@ mod tests {
         assert_eq!(entries[0].registered, Some(true));
         assert_eq!(entries[0].issue_key.as_deref(), Some("PP-1"));
         assert_eq!(entries[0].jira, Some(true));
-        assert_eq!(entries[1].registered, None);
+        assert_eq!(entries[0].block_ids, [11, 14]);
+        assert_eq!(entries[1].registered, Some(false));
+        assert_eq!(entries[1].excluded_reason.as_deref(), Some("running"));
         assert_eq!(entries[1].stop, None);
         assert_eq!(entries[1].color, "var(--fg-faint)");
     }
 
     #[test]
-    fn entries_whose_ids_repeat_get_no_registration() {
+    fn a_merged_entry_is_registered_only_when_every_block_is() {
         let mut report = bita(true);
-        let mut copy = report.entries.as_ref().expect("entries")[0].clone();
-        copy.start = "2026-10-05T18:00:00.000Z".into();
-        report.entries.as_mut().expect("entries").push(copy);
+        let entries = report.entries.as_mut().expect("entries");
+        let mut next_day = entries[0].clone();
+        next_day.local_day = "2026-10-06".into();
+        next_day.block_ids = vec![15];
+        entries.push(next_day);
         let mut status = tally(true);
-        status.entries.as_mut().expect("entries").push(TallyEntry {
-            entry_id: 12,
+        let rows = status.entries.as_mut().expect("entries");
+        rows[1].registered = false;
+        rows[1].issue_key = None;
+        rows.push(TallyEntry {
+            entry_id: 15,
             registered: true,
-            issue_key: Some("PP-2".into()),
+            issue_key: Some("PP-9".into()),
             jira: true,
             excluded_reason: None,
-        });
-        status.entries.as_mut().expect("entries").push(TallyEntry {
-            entry_id: 12,
-            registered: false,
-            issue_key: None,
-            jira: true,
-            excluded_reason: None,
+            project_id: Some(7),
+            local_day: Some("2026-10-06".into()),
+            seconds: 600,
         });
         let entries = merge(report, Some(status)).entries.expect("entries");
-        assert!(entries.iter().all(|entry| entry.registered.is_none() && entry.issue_key.is_none()));
+        assert_eq!(entries[0].registered, Some(false));
+        assert_eq!(entries[0].issue_key, None);
+        assert_eq!(entries[2].id, entries[0].id);
+        assert_eq!(entries[2].registered, Some(true));
+        assert_eq!(entries[2].issue_key.as_deref(), Some("PP-9"));
     }
 
     #[test]
-    fn only_a_missing_status_command_is_silent() {
+    fn entries_without_tally_rows_have_no_registration() {
+        let mut status = tally(true);
+        status.entries = Some(Vec::new());
+        let entries = merge(bita(true), Some(status)).entries.expect("entries");
+        assert!(entries.iter().all(|entry| entry.registered.is_none() && entry.jira.is_none()));
+    }
+
+    #[test]
+    fn support_comes_from_the_declared_capabilities() {
+        let declared = vec!["time.entries.read".to_string(), REPORT_CAPABILITY.to_string()];
+        assert_eq!(support(&declared, true, REPORT_CAPABILITY), Support::Yes);
+        assert_eq!(support(&declared, false, REPORT_CAPABILITY), Support::Yes);
+        assert_eq!(support(&declared, true, STATUS_CAPABILITY), Support::No);
+        assert_eq!(support(&declared, false, STATUS_CAPABILITY), Support::Unknown);
+    }
+
+    #[test]
+    fn a_project_named_by_bita_keeps_its_name() {
+        assert_eq!(project_name(None, "(no project)".into()), "Sin proyecto");
+        assert_eq!(project_name(None, String::new()), "Sin proyecto");
+        assert_eq!(project_name(Some(4), "(no project)".into()), "(no project)");
+        assert_eq!(project_name(Some(4), "Contrato".into()), "Contrato");
+    }
+
+    #[test]
+    fn an_old_tally_asks_to_upgrade_and_a_missing_one_is_silent() {
         let (status, problem) = tally_outcome(Ok(None));
         assert!(status.is_none() && problem.is_none());
 
         let unknown = Problem::new(ProblemKind::CliFailed, "Unknown command \"status\". (UNKNOWN_COMMAND)");
         let (status, problem) = tally_outcome(Err(unknown));
-        assert!(status.is_none() && problem.is_none());
+        assert!(status.is_none());
+        assert_eq!(problem.as_deref(), Some(UPGRADE_TALLY));
+
+        let declared_old = Problem::new(ProblemKind::CliTooOld, UPGRADE_TALLY);
+        let (status, problem) = tally_outcome(Err(declared_old));
+        assert!(status.is_none());
+        assert_eq!(problem.as_deref(), Some(UPGRADE_TALLY));
 
         let broken = Problem::new(ProblemKind::Unreadable, "No entiendo la respuesta de tally: missing field");
         let (status, problem) = tally_outcome(Err(broken));
@@ -630,7 +732,7 @@ mod tests {
         }
         assert_eq!(json["range"]["fromDay"], "2026-10-05");
         assert_eq!(json["range"]["weekStartsOn"], 1);
-        for key in ["projectId", "clientName", "totalSeconds", "entryCount", "color", "jira", "registeredSeconds", "pendingSeconds"] {
+        for key in ["projectId", "clientName", "totalSeconds", "entryCount", "color", "jira", "registeredSeconds", "pendingSeconds", "excludedSeconds"] {
             assert!(json["projects"][0].get(key).is_some(), "missing {key}");
         }
         assert_eq!(json["days"][0]["projects"][0]["projectId"], 7);
@@ -645,7 +747,10 @@ mod tests {
         asked.project_id = Some(7);
         asked.entries = Some(true);
         assert_eq!(bita_args(&asked).unwrap(), ["report", "week", "--project", "7", "--entries"]);
-        assert_eq!(tally_args(&asked).unwrap(), ["status", "week", "--project", "7", "--entries"]);
+        assert_eq!(
+            tally_args(&asked).unwrap(),
+            ["status", "week", "--project", "7", "--entries", "--include-running"]
+        );
         assert_eq!(bita_args(&ReportRequest::default()).unwrap(), ["report"]);
     }
 
