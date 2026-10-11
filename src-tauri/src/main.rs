@@ -21,6 +21,7 @@ mod proposals;
 mod recap;
 mod registry;
 mod report;
+mod reports;
 #[cfg(target_os = "macos")]
 mod screen;
 mod state;
@@ -76,6 +77,7 @@ fn main() {
             commands::doctor_report,
             tools::tools_status,
             commands::open_notes,
+            commands::open_reports,
             commands::notes_take_focus,
             notes_cmd::notes_tree,
             notes_cmd::notes_list,

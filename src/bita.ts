@@ -416,6 +416,10 @@ export function openNotes(entryId: number | null): Promise<void> {
   return invoke<void>('open_notes', { entryId })
 }
 
+export function openReports(): Promise<void> {
+  return invoke<void>('open_reports')
+}
+
 export function notesTakeFocus(): Promise<number | null> {
   return invoke<number | null>('notes_take_focus')
 }
