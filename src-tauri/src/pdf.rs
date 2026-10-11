@@ -14,10 +14,17 @@ const SETTLE_TRIES: usize = 40;
 const NAME_MAX_CHARS: usize = 120;
 
 pub(crate) fn sanitize(file_name: &str) -> String {
+    sanitize_with(file_name, "pdf")
+}
+
+pub(crate) fn sanitize_with(file_name: &str, extension: &str) -> String {
     let trimmed = file_name.trim();
+    let suffix = format!(".{extension}");
     let base = trimmed
-        .strip_suffix(".pdf")
-        .or_else(|| trimmed.strip_suffix(".PDF"))
+        .len()
+        .checked_sub(suffix.len())
+        .filter(|&at| trimmed.is_char_boundary(at) && trimmed[at..].eq_ignore_ascii_case(&suffix))
+        .map(|at| &trimmed[..at])
         .unwrap_or(trimmed);
     let cleaned: String = base
         .chars()
@@ -34,12 +41,16 @@ pub(crate) fn sanitize(file_name: &str) -> String {
 }
 
 pub(crate) fn unique_path(dir: &Path, stem: &str) -> PathBuf {
-    let first = dir.join(format!("{stem}.pdf"));
+    unique_path_with(dir, stem, "pdf")
+}
+
+pub(crate) fn unique_path_with(dir: &Path, stem: &str, extension: &str) -> PathBuf {
+    let first = dir.join(format!("{stem}.{extension}"));
     if !first.exists() {
         return first;
     }
     (2..)
-        .map(|n| dir.join(format!("{stem} ({n}).pdf")))
+        .map(|n| dir.join(format!("{stem} ({n}).{extension}")))
         .find(|candidate| !candidate.exists())
         .unwrap_or(first)
 }

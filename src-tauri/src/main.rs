@@ -15,11 +15,15 @@ mod live_wide;
 mod meeting;
 mod notes_cmd;
 mod panel;
+mod pay;
 mod pdf;
+mod report_export;
 mod platform;
 mod proposals;
 mod recap;
 mod registry;
+mod report;
+mod reports;
 #[cfg(target_os = "macos")]
 mod screen;
 mod state;
@@ -67,6 +71,9 @@ fn main() {
             commands::amend_timer,
             commands::worked,
             commands::pending,
+            report::report,
+            pay::get_pay,
+            pay::set_pay,
             commands::scopes,
             commands::add_project,
             commands::set_scope,
@@ -74,6 +81,7 @@ fn main() {
             commands::doctor_report,
             tools::tools_status,
             commands::open_notes,
+            commands::open_reports,
             commands::notes_take_focus,
             notes_cmd::notes_tree,
             notes_cmd::notes_list,
@@ -101,6 +109,7 @@ fn main() {
             media::storage_report,
             media::reveal_in_finder,
             pdf::export_pdf,
+            report_export::export_report,
             atlassian_cmd::atlassian_sites,
             atlassian_cmd::atlassian_site_add,
             atlassian_cmd::atlassian_site_test,

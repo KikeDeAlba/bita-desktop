@@ -206,6 +206,152 @@ export function pending(): Promise<SummaryView> {
   return invoke<SummaryView>('pending')
 }
 
+export interface ReportRange {
+  fromDay: string
+  toDay: string
+  timezone: string | null
+  weekStartsOn: number | string | null
+}
+
+export interface ReportProject {
+  projectId: number | null
+  name: string
+  clientName: string | null
+  totalSeconds: number
+  entryCount: number
+  color: string
+  jira: boolean
+  registeredSeconds: number
+  pendingSeconds: number
+  excludedSeconds: number
+}
+
+export interface ProjectSeconds {
+  projectId: number | null
+  seconds: number
+}
+
+export interface ReportDay {
+  day: string
+  totalSeconds: number
+  projects: ProjectSeconds[]
+}
+
+export interface ReportWeek {
+  fromDay: string
+  toDay: string
+  totalSeconds: number
+  projects: ProjectSeconds[]
+}
+
+export interface ReportEntry {
+  id: number
+  title: string
+  projectId: number | null
+  start: string
+  stop: string | null
+  localDay: string
+  seconds: number
+  kind: string | null
+  overlapping: boolean
+  blockIds: number[]
+  color: string
+  registered: boolean | null
+  issueKey: string | null
+  jira: boolean | null
+  excludedReason: string | null
+}
+
+export interface JiraTotals {
+  registeredSeconds: number
+  pendingSeconds: number
+  excludedSeconds: number
+  nonJiraSeconds: number
+  estimateSeconds?: number
+}
+
+export interface Pay {
+  monthlySalary: number | null
+  currency: string
+  monthlyHours: number
+  multiplier: number
+  excludedProjects: number[]
+}
+
+export interface OvertimeProject {
+  projectId: number | null
+  name: string | null
+  estimateSeconds: number
+  counts: boolean
+}
+
+export interface OvertimeMonth {
+  month: string
+  from: string
+  to: string
+  partial: boolean
+  estimateSeconds: number
+  expectedSeconds: number
+  overtimeSeconds: number
+  payX1: number
+  payMultiplied: number
+  byProject: OvertimeProject[]
+}
+
+export interface OvertimeTotals {
+  estimateSeconds: number
+  expectedSeconds: number
+  overtimeSeconds: number
+  payX1: number
+  payMultiplied: number
+}
+
+export interface Overtime {
+  currency: string
+  hourlyRate: number
+  multiplier: number
+  monthlyHours: number
+  months: OvertimeMonth[]
+  totals: OvertimeTotals
+  problem: string | null
+}
+
+export interface ReportView {
+  range: ReportRange
+  totalSeconds: number
+  entryCount: number
+  activeDays: number
+  projects: ReportProject[]
+  days: ReportDay[]
+  weeks: ReportWeek[]
+  overlaps: Overlap[]
+  entries: ReportEntry[] | null
+  jiraAvailable: boolean
+  jiraTotals: JiraTotals | null
+  jiraProblem: string | null
+  overtime: Overtime | null
+}
+
+export interface ReportRequest {
+  preset?: string
+  from?: string
+  to?: string
+  projectId?: number
+  entries?: boolean
+}
+
+export function report(request: ReportRequest = {}): Promise<ReportView> {
+  return invoke<ReportView>('report', { ...request })
+}
+
+export function getPay(): Promise<Pay> {
+  return invoke<Pay>('get_pay')
+}
+
+export function setPay(pay: Pay): Promise<Pay> {
+  return invoke<Pay>('set_pay', { pay })
+}
+
 export function scopes(): Promise<Scope[]> {
   return invoke<Scope[]>('scopes')
 }
@@ -324,6 +470,10 @@ export function installHint(status: ToolsStatus | null, tool: ToolName): string 
 
 export function openNotes(entryId: number | null): Promise<void> {
   return invoke<void>('open_notes', { entryId })
+}
+
+export function openReports(): Promise<void> {
+  return invoke<void>('open_reports')
 }
 
 export function notesTakeFocus(): Promise<number | null> {
@@ -1120,6 +1270,28 @@ export function storageReport(): Promise<StorageReport> {
 
 export function exportPdf(fileName: string): Promise<string> {
   return invoke<string>('export_pdf', { fileName })
+}
+
+export type ReportExportFormat = 'csv' | 'md' | 'xlsx'
+
+export interface ReportExportInclude {
+  charts?: boolean
+  projects?: boolean
+  entries?: boolean
+  jira?: boolean
+  pay?: boolean
+}
+
+export type ReportGroupBy = 'project' | 'day' | 'week'
+
+export function exportReport(
+  format: ReportExportFormat,
+  report: unknown,
+  include: ReportExportInclude = {},
+  groupBy: ReportGroupBy = 'project',
+  fileName?: string,
+): Promise<string> {
+  return invoke<string>('export_report', { format, report, include, groupBy, fileName: fileName ?? null })
 }
 
 export function revealInFinder(path: string): Promise<void> {

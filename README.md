@@ -97,7 +97,7 @@ src-tauri/target/debug/den --tools-status
 ## Instalación
 
 Cada versión se publica en
-[GitHub Releases](https://github.com/KikeDeAlba/bita-desktop/releases) como un
+[GitHub Releases](https://github.com/KikeDeAlba/den/releases) como un
 `.dmg` para Apple Silicon, firmado ad hoc y sin notarizar: la primera vez hay
 que abrirlo con clic derecho → Abrir. Para compilarlo tú mismo, sigue estos
 pasos.
@@ -114,8 +114,8 @@ Reinicia la terminal después de instalar Rust.
 ### 2. Clonar
 
 ```sh
-git clone git@github.com:KikeDeAlba/bita-desktop.git
-cd bita-desktop
+git clone git@github.com:KikeDeAlba/den.git
+cd den
 pnpm install
 ```
 
@@ -310,6 +310,20 @@ escapar, porque el escapado es estructural. Lo que la gramática no reconoce se
 emite como párrafo literal: nunca se pierde contenido. Las tablas GFM salen como
 `<table>` de verdad por la misma vía, y cada celda pasa por el mismo paso en
 línea, así que los enlaces y el resaltado de la búsqueda funcionan dentro.
+
+## La ventana de reportes
+
+El botón de la gráfica de barras, en la barra del panel entre las notas y los
+ajustes, abre los reportes: el tiempo por proyecto en un rango, con gráficas y
+exportación. Igual que las notas, el panel no tiene espacio para eso, así que
+vive en una ventana propia (`reportes.html`) de 1280×820, o el 90 % de la
+pantalla si es más chica, con un mínimo de 720×420.
+
+Se construye desde Rust la primera vez que se pide, y no al arrancar. Un
+segundo clic reutiliza la misma ventana y la trae al frente; al cerrarla se
+esconde en lugar de destruirse. Mientras está abierta cuenta como ventana
+normal, así que macOS pasa a `Regular` y aparece en el Dock y en cmd+Tab. El
+botón solo aparece si el módulo de cronómetros (bita) está activo.
 
 ## El tamaño del texto
 

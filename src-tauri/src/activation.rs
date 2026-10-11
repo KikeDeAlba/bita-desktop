@@ -3,7 +3,11 @@ use tauri::{AppHandle, Manager};
 #[cfg(target_os = "macos")]
 const KEEP_ACCESSORY_ENV: &str = "BITA_KEEP_ACCESSORY";
 
-pub const NORMAL_WINDOWS: [&str; 2] = [crate::notes::LABEL, crate::live_wide::LABEL];
+pub const NORMAL_WINDOWS: [&str; 3] = [
+    crate::notes::LABEL,
+    crate::live_wide::LABEL,
+    crate::reports::LABEL,
+];
 
 pub fn wants_regular(windows: &[(&str, bool)], hiding: Option<&str>) -> bool {
     windows
@@ -54,19 +58,54 @@ mod tests {
 
     #[test]
     fn no_visible_window_keeps_the_app_out_of_the_dock() {
-        assert!(!wants_regular(&[("notas", false), ("live-wide", false)], None));
+        assert!(!wants_regular(
+            &[("notas", false), ("live-wide", false), ("reportes", false)],
+            None
+        ));
     }
 
     #[test]
     fn any_visible_normal_window_puts_the_app_in_the_dock() {
-        assert!(wants_regular(&[("notas", true), ("live-wide", false)], None));
-        assert!(wants_regular(&[("notas", false), ("live-wide", true)], None));
+        assert!(wants_regular(
+            &[("notas", true), ("live-wide", false), ("reportes", false)],
+            None
+        ));
+        assert!(wants_regular(
+            &[("notas", false), ("live-wide", true), ("reportes", false)],
+            None
+        ));
+        assert!(wants_regular(
+            &[("notas", false), ("live-wide", false), ("reportes", true)],
+            None
+        ));
     }
 
     #[test]
     fn the_window_being_hidden_does_not_count() {
-        assert!(!wants_regular(&[("notas", true), ("live-wide", false)], Some("notas")));
-        assert!(wants_regular(&[("notas", true), ("live-wide", true)], Some("notas")));
-        assert!(wants_regular(&[("notas", true), ("live-wide", true)], Some("live-wide")));
+        assert!(!wants_regular(
+            &[("notas", true), ("live-wide", false), ("reportes", false)],
+            Some("notas")
+        ));
+        assert!(wants_regular(
+            &[("notas", true), ("live-wide", true), ("reportes", false)],
+            Some("notas")
+        ));
+        assert!(wants_regular(
+            &[("notas", true), ("live-wide", true), ("reportes", false)],
+            Some("live-wide")
+        ));
+        assert!(!wants_regular(
+            &[("notas", false), ("live-wide", false), ("reportes", true)],
+            Some("reportes")
+        ));
+        assert!(wants_regular(
+            &[("notas", true), ("live-wide", false), ("reportes", true)],
+            Some("reportes")
+        ));
+    }
+
+    #[test]
+    fn the_reports_window_is_a_normal_window() {
+        assert!(super::NORMAL_WINDOWS.contains(&"reportes"));
     }
 }
