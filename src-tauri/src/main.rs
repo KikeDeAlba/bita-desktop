@@ -3,6 +3,7 @@ mod ask;
 mod atlassian_cmd;
 mod cli;
 mod commands;
+mod coworkers;
 mod docs;
 mod doctor;
 mod worked;
@@ -74,6 +75,10 @@ fn main() {
             report::report,
             pay::get_pay,
             pay::set_pay,
+            coworkers::coworker_overtime,
+            coworkers::overtime_excludes_list,
+            coworkers::overtime_excludes_add,
+            coworkers::overtime_excludes_remove,
             commands::scopes,
             commands::add_project,
             commands::set_scope,
