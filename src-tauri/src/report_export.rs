@@ -14,6 +14,8 @@ use crate::pdf::{sanitize_with, unique_path_with};
 const NO_PROJECT: &str = "Sin proyecto";
 const BOM: &str = "\u{feff}";
 const NONE_KEY: &str = "none";
+const DEFAULT_CURRENCY: &str = "MXN";
+const OVERTIME: &str = "Horas extra";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -49,6 +51,7 @@ pub struct Include {
     pub projects: Option<bool>,
     pub entries: Option<bool>,
     pub jira: Option<bool>,
+    pub pay: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -106,6 +109,39 @@ struct ReportEntry {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
+struct ReportOvertimeMonth {
+    month: Option<String>,
+    partial: Option<bool>,
+    estimate_seconds: Option<f64>,
+    expected_seconds: Option<f64>,
+    overtime_seconds: Option<f64>,
+    pay_x1: Option<f64>,
+    pay_multiplied: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct ReportOvertimeTotals {
+    estimate_seconds: Option<f64>,
+    expected_seconds: Option<f64>,
+    overtime_seconds: Option<f64>,
+    pay_x1: Option<f64>,
+    pay_multiplied: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct ReportOvertime {
+    hourly_rate: Option<f64>,
+    multiplier: Option<f64>,
+    currency: Option<String>,
+    months: Option<Vec<ReportOvertimeMonth>>,
+    totals: Option<ReportOvertimeTotals>,
+    problem: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
 struct ReportView {
     range: Option<ReportRange>,
     total_seconds: Option<f64>,
@@ -116,6 +152,17 @@ struct ReportView {
     weeks: Option<Vec<ReportDay>>,
     entries: Option<Vec<ReportEntry>>,
     jira_available: Option<bool>,
+    #[serde(deserialize_with = "lenient")]
+    overtime: Option<ReportOvertime>,
+}
+
+fn lenient<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = Value::deserialize(deserializer)?;
+    Ok(serde_json::from_value(value).ok())
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,6 +207,27 @@ struct Entry {
     jira: Option<EntryJira>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct OvertimeMonth {
+    month: String,
+    partial: bool,
+    estimate: f64,
+    expected: f64,
+    overtime: f64,
+    pay_x1: f64,
+    pay_multiplied: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct Overtime {
+    hourly_rate: f64,
+    multiplier: f64,
+    currency: String,
+    months: Vec<OvertimeMonth>,
+    total: OvertimeMonth,
+    problem: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct Report {
     from_day: String,
@@ -173,6 +241,7 @@ struct Report {
     weeks: Vec<Day>,
     entries: Option<Vec<Entry>>,
     jira: bool,
+    overtime: Option<Overtime>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -182,6 +251,7 @@ struct Sections {
     projects: bool,
     entries: bool,
     jira: bool,
+    pay: bool,
 }
 
 fn project_key(id: &Option<Value>) -> String {
@@ -198,6 +268,58 @@ fn count(value: Option<f64>) -> u64 {
 
 fn seconds(value: Option<f64>) -> f64 {
     value.filter(|n| n.is_finite() && *n > 0.0).unwrap_or(0.0)
+}
+
+fn money(value: Option<f64>) -> f64 {
+    value.filter(|n| n.is_finite() && *n > 0.0).unwrap_or(0.0)
+}
+
+fn normalize_overtime(view: ReportOvertime) -> Overtime {
+    let months: Vec<OvertimeMonth> = view
+        .months
+        .unwrap_or_default()
+        .into_iter()
+        .map(|month| OvertimeMonth {
+            month: month.month.unwrap_or_default(),
+            partial: month.partial.unwrap_or(false),
+            estimate: seconds(month.estimate_seconds),
+            expected: seconds(month.expected_seconds),
+            overtime: seconds(month.overtime_seconds),
+            pay_x1: money(month.pay_x1),
+            pay_multiplied: money(month.pay_multiplied),
+        })
+        .collect();
+    let totals = view.totals.unwrap_or_default();
+    let sum = |pick: fn(&OvertimeMonth) -> f64| months.iter().map(pick).sum::<f64>();
+    let total = OvertimeMonth {
+        month: "Total".into(),
+        partial: false,
+        estimate: totals.estimate_seconds.map(|n| seconds(Some(n))).unwrap_or_else(|| sum(|m| m.estimate)),
+        expected: totals.expected_seconds.map(|n| seconds(Some(n))).unwrap_or_else(|| sum(|m| m.expected)),
+        overtime: totals.overtime_seconds.map(|n| seconds(Some(n))).unwrap_or_else(|| sum(|m| m.overtime)),
+        pay_x1: totals.pay_x1.map(|n| money(Some(n))).unwrap_or_else(|| sum(|m| m.pay_x1)),
+        pay_multiplied: totals
+            .pay_multiplied
+            .map(|n| money(Some(n)))
+            .unwrap_or_else(|| sum(|m| m.pay_multiplied)),
+    };
+    let currency = view
+        .currency
+        .map(|code| code.trim().to_string())
+        .filter(|code| !code.is_empty())
+        .unwrap_or_else(|| DEFAULT_CURRENCY.into());
+    Overtime {
+        hourly_rate: money(view.hourly_rate),
+        multiplier: view
+            .multiplier
+            .filter(|n| n.is_finite() && *n > 0.0)
+            .or_else(|| (total.pay_x1 > 0.0).then(|| total.pay_multiplied / total.pay_x1))
+            .unwrap_or(2.0),
+        currency,
+        months,
+        total,
+        problem: view.problem.filter(|text| !text.trim().is_empty()),
+    }
 }
 
 fn zone(name: &str) -> TimeZone {
@@ -242,6 +364,7 @@ fn normalize(view: ReportView) -> Report {
     let timezone = range.timezone.unwrap_or_default();
     let tz = zone(&timezone);
     let jira = view.jira_available.unwrap_or(false);
+    let overtime = view.overtime.map(normalize_overtime);
 
     let projects: Vec<Project> = view
         .projects
@@ -357,6 +480,7 @@ fn normalize(view: ReportView) -> Report {
         weeks,
         entries,
         jira,
+        overtime,
     }
 }
 
@@ -368,7 +492,12 @@ impl Report {
             projects: include.projects.unwrap_or(true),
             entries: include.entries.unwrap_or(true) && self.entries.is_some(),
             jira: include.jira.unwrap_or(true) && self.jira,
+            pay: include.pay.unwrap_or(false) && self.overtime.is_some(),
         }
+    }
+
+    fn pay(&self, sections: Sections) -> Option<&Overtime> {
+        self.overtime.as_ref().filter(|_| sections.pay)
     }
 
     fn average(&self) -> f64 {
@@ -452,6 +581,71 @@ fn jira_label(totals: Option<JiraTotals>) -> String {
     }
 }
 
+fn factor(multiplier: f64) -> String {
+    let text = format!("{multiplier:.2}");
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
+fn symbol(currency: &str) -> Option<&'static str> {
+    match currency.to_ascii_uppercase().as_str() {
+        "MXN" | "USD" | "CAD" | "AUD" | "NZD" | "ARS" | "CLP" | "COP" => Some("$"),
+        "EUR" => Some("€"),
+        "GBP" => Some("£"),
+        _ => None,
+    }
+}
+
+fn currency_format(currency: &str) -> String {
+    match symbol(currency) {
+        Some(sign) => format!("\"{sign}\"#,##0.00"),
+        None => "#,##0.00".into(),
+    }
+}
+
+fn amount(value: f64) -> String {
+    format!("{value:.2}")
+}
+
+fn grouped_amount(value: f64, currency: &str) -> String {
+    let fixed = amount(value);
+    let (digits, cents) = fixed.split_once('.').unwrap_or((&fixed, "00"));
+    let mut grouped = String::new();
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    format!("{}{grouped}.{cents}", symbol(currency).unwrap_or(""))
+}
+
+const PARTIAL_NOTE: &str = "Los meses en curso se cuentan hasta hoy.";
+
+fn status(month: &OvertimeMonth) -> &'static str {
+    if month.partial {
+        "en curso"
+    } else {
+        "cerrado"
+    }
+}
+
+fn overtime_note(overtime: &Overtime) -> &str {
+    overtime.problem.as_deref().unwrap_or("Sin datos de horas extra para este rango.")
+}
+
+fn overtime_labels(overtime: &Overtime) -> Vec<String> {
+    let code = &overtime.currency;
+    vec![
+        "Mes".into(),
+        "Estado".into(),
+        "Estimadas (h)".into(),
+        "Esperadas (h)".into(),
+        "Extra (h)".into(),
+        format!("Pago ×1 ({code})"),
+        format!("Pago ×{} ({code})", factor(overtime.multiplier)),
+    ]
+}
+
 fn csv_field(value: &str) -> String {
     let value = &if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
         format!("'{value}")
@@ -521,6 +715,38 @@ fn render_csv(report: &Report, sections: Sections) -> String {
                     );
                 }
             }
+        }
+    }
+    if let Some(overtime) = report.pay(sections) {
+        out.push_str("\r\n");
+        csv_line(&mut out, &[OVERTIME.to_string()]);
+        if overtime.months.is_empty() {
+            csv_line(&mut out, &[overtime_note(overtime).to_string()]);
+            return out;
+        }
+        csv_line(&mut out, &overtime_labels(overtime));
+        let rows = overtime.months.iter().map(|m| (m, status(m))).chain([(&overtime.total, "")]);
+        for (month, state) in rows {
+            csv_line(
+                &mut out,
+                &[
+                    month.month.clone(),
+                    state.into(),
+                    fixed(month.estimate),
+                    fixed(month.expected),
+                    fixed(month.overtime),
+                    amount(month.pay_x1),
+                    amount(month.pay_multiplied),
+                ],
+            );
+        }
+        csv_line(
+            &mut out,
+            &[format!("Tarifa por hora ({})", overtime.currency), amount(overtime.hourly_rate)],
+        );
+        csv_line(&mut out, &["Multiplicador".into(), factor(overtime.multiplier)]);
+        if overtime.months.iter().any(|m| m.partial) {
+            csv_line(&mut out, &[PARTIAL_NOTE.to_string()]);
         }
     }
     out
@@ -671,6 +897,53 @@ fn render_md(report: &Report, sections: Sections) -> String {
                 );
             }
             md_row(&mut out, &row);
+        }
+    }
+
+    if let Some(overtime) = report.pay(sections) {
+        out.push_str(&format!("\n## {OVERTIME}\n\n"));
+        if overtime.months.is_empty() {
+            out.push_str(overtime_note(overtime));
+            out.push('\n');
+        } else {
+            out.push_str(&format!(
+                "**Tarifa por hora:** {} {} · **Multiplicador:** ×{}\n\n",
+                grouped_amount(overtime.hourly_rate, &overtime.currency),
+                overtime.currency,
+                factor(overtime.multiplier)
+            ));
+            md_row(&mut out, &overtime_labels(overtime));
+            md_rule(&mut out, &[false, false, true, true, true, true, true]);
+            for month in &overtime.months {
+                md_row(
+                    &mut out,
+                    &[
+                        month.month.clone(),
+                        status(month).into(),
+                        format!("{:.1}", hours(month.estimate)),
+                        format!("{:.1}", hours(month.expected)),
+                        format!("{:.1}", hours(month.overtime)),
+                        grouped_amount(month.pay_x1, &overtime.currency),
+                        grouped_amount(month.pay_multiplied, &overtime.currency),
+                    ],
+                );
+            }
+            let total = &overtime.total;
+            md_row(
+                &mut out,
+                &[
+                    "**Total**".into(),
+                    String::new(),
+                    format!("**{:.1}**", hours(total.estimate)),
+                    format!("**{:.1}**", hours(total.expected)),
+                    format!("**{:.1}**", hours(total.overtime)),
+                    format!("**{}**", grouped_amount(total.pay_x1, &overtime.currency)),
+                    format!("**{}**", grouped_amount(total.pay_multiplied, &overtime.currency)),
+                ],
+            );
+            if overtime.months.iter().any(|m| m.partial) {
+                out.push_str(&format!("\n{PARTIAL_NOTE}\n"));
+            }
         }
     }
     out
@@ -827,6 +1100,50 @@ fn render_xlsx(report: &Report, sections: Sections) -> Result<Vec<u8>, XlsxError
         }
     }
 
+    if let Some(overtime) = report.pay(sections) {
+        let code = currency_format(&overtime.currency);
+        let currency = Format::new().set_num_format(&code);
+        let bold_hours = Format::new().set_bold().set_num_format("0.0");
+        let bold_currency = Format::new().set_bold().set_num_format(&code);
+        let sheet = workbook.add_worksheet();
+        sheet.set_name(OVERTIME)?;
+        if overtime.months.is_empty() {
+            sheet.set_column_width(0, 60.0)?;
+            sheet.write_string(0, 0, overtime_note(overtime))?;
+            return workbook.save_to_buffer();
+        }
+        let labels = overtime_labels(overtime);
+        let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+        header_row(sheet, &styles, &labels, &[12.0, 10.0, 14.0, 14.0, 10.0, 16.0, 16.0])?;
+        let mut row = 1u32;
+        for month in &overtime.months {
+            sheet.write_string(row, 0, &month.month)?;
+            sheet.write_string(row, 1, status(month))?;
+            sheet.write_number_with_format(row, 2, hours(month.estimate), &styles.hours)?;
+            sheet.write_number_with_format(row, 3, hours(month.expected), &styles.hours)?;
+            sheet.write_number_with_format(row, 4, hours(month.overtime), &styles.hours)?;
+            sheet.write_number_with_format(row, 5, month.pay_x1, &currency)?;
+            sheet.write_number_with_format(row, 6, month.pay_multiplied, &currency)?;
+            row += 1;
+        }
+        let total = &overtime.total;
+        sheet.write_string_with_format(row, 0, "Total", &styles.header)?;
+        sheet.write_number_with_format(row, 2, hours(total.estimate), &bold_hours)?;
+        sheet.write_number_with_format(row, 3, hours(total.expected), &bold_hours)?;
+        sheet.write_number_with_format(row, 4, hours(total.overtime), &bold_hours)?;
+        sheet.write_number_with_format(row, 5, total.pay_x1, &bold_currency)?;
+        sheet.write_number_with_format(row, 6, total.pay_multiplied, &bold_currency)?;
+        row += 2;
+        sheet.write_string_with_format(row, 0, format!("Tarifa por hora ({})", overtime.currency), &styles.header)?;
+        sheet.write_number_with_format(row, 2, overtime.hourly_rate, &currency)?;
+        row += 1;
+        sheet.write_string_with_format(row, 0, "Multiplicador", &styles.header)?;
+        sheet.write_number(row, 2, overtime.multiplier)?;
+        if overtime.months.iter().any(|m| m.partial) {
+            sheet.write_string(row + 2, 0, PARTIAL_NOTE)?;
+        }
+    }
+
     workbook.save_to_buffer()
 }
 
@@ -938,6 +1255,57 @@ mod tests {
         normalize(serde_json::from_value(fixture()).expect("view"))
     }
 
+    const MONEY: [&str; 8] = ["287.35", "3448.2", "3,448.20", "6896.4", "6,896.40", "Pago", "Tarifa", "$"];
+
+    fn overtime_fixture() -> Value {
+        let mut view = fixture();
+        view["overtime"] = serde_json::json!({
+            "hourlyRate": 287.35,
+            "multiplier": 2,
+            "months": [
+                {"month": "2026-09", "partial": false, "estimateSeconds": 619200, "expectedSeconds": 576000, "overtimeSeconds": 43200, "payX1": 3448.2, "payMultiplied": 6896.4, "byProject": [{"projectId": 222494997, "estimateSeconds": 619200, "counts": true}]},
+                {"month": "2026-10", "partial": true, "estimateSeconds": 72000, "expectedSeconds": 576000, "overtimeSeconds": 0, "payX1": 0, "payMultiplied": 0, "byProject": []}
+            ],
+            "totals": {"estimateSeconds": 691200, "expectedSeconds": 1152000, "overtimeSeconds": 43200, "payX1": 3448.2, "payMultiplied": 6896.4}
+        });
+        view
+    }
+
+    fn overtime_report() -> Report {
+        normalize(serde_json::from_value(overtime_fixture()).expect("view"))
+    }
+
+    fn with_pay() -> Include {
+        Include { pay: Some(true), ..Include::default() }
+    }
+
+    fn xlsx_text(bytes: &[u8]) -> HashMap<String, String> {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).expect("zip");
+        let mut parts = HashMap::new();
+        for index in 0..archive.len() {
+            let mut file = archive.by_index(index).expect("part");
+            let mut text = String::new();
+            if std::io::Read::read_to_string(&mut file, &mut text).is_ok() {
+                parts.insert(file.name().to_string(), text);
+            }
+        }
+        parts
+    }
+
+    fn overtime_sheet(parts: &HashMap<String, String>) -> &str {
+        let workbook = &parts["xl/workbook.xml"];
+        let names: Vec<&str> = workbook.split("<sheet ").skip(1).collect();
+        let index = names.iter().position(|sheet| sheet.contains("name=\"Horas extra\"")).expect("overtime sheet");
+        &parts[&format!("xl/worksheets/sheet{}.xml", index + 1)]
+    }
+
+    fn assert_no_money(text: &str) {
+        for needle in MONEY {
+            assert!(!text.contains(needle), "{needle} leaked");
+        }
+        assert!(!text.contains(OVERTIME));
+    }
+
     fn all() -> Include {
         Include::default()
     }
@@ -953,6 +1321,7 @@ mod tests {
         let body = text.strip_prefix(BOM).expect("bom");
         csv::ReaderBuilder::new()
             .has_headers(false)
+            .flexible(true)
             .from_reader(body.as_bytes())
             .records()
             .map(|record| record.expect("record").iter().map(str::to_string).collect())
@@ -1087,7 +1456,7 @@ mod tests {
     #[test]
     fn markdown_respects_include() {
         let report = report();
-        let include = Include { charts: Some(false), projects: Some(false), entries: Some(false), jira: Some(false) };
+        let include = Include { charts: Some(false), projects: Some(false), entries: Some(false), jira: Some(false), pay: None };
         let text = render_md(&report, report.sections(&include, GroupBy::Project));
         assert!(!text.contains("## Por proyecto"));
         assert!(!text.contains("## Por día"));
@@ -1124,6 +1493,131 @@ mod tests {
     }
 
     #[test]
+    fn overtime_is_read_leniently() {
+        let report = overtime_report();
+        let overtime = report.overtime.as_ref().expect("overtime");
+        assert_eq!(overtime.currency, "MXN");
+        assert_eq!(overtime.multiplier, 2.0);
+        assert_eq!(overtime.months.len(), 2);
+        assert!(overtime.months[1].partial);
+        assert_eq!(overtime.total.pay_multiplied, 6896.4);
+
+        let mut view = overtime_fixture();
+        view["overtime"]["currency"] = Value::from("USD");
+        view["overtime"]["totals"] = Value::Null;
+        let derived = normalize(serde_json::from_value(view).expect("view"));
+        let derived = derived.overtime.expect("overtime");
+        assert_eq!(derived.currency, "USD");
+        assert_eq!(derived.total.overtime, 43200.0);
+        assert!((derived.total.pay_x1 - 3448.2).abs() < 1e-9);
+
+        let mut broken = fixture();
+        broken["overtime"] = Value::from("nope");
+        let broken = normalize(serde_json::from_value(broken).expect("view"));
+        assert!(broken.overtime.is_none());
+        assert!(!broken.sections(&with_pay(), GroupBy::Project).pay);
+    }
+
+    #[test]
+    fn exports_without_pay_have_no_amounts() {
+        let report = overtime_report();
+        for include in [Include::default(), Include { pay: Some(false), ..Include::default() }] {
+            let sections = report.sections(&include, GroupBy::Project);
+            assert!(!sections.pay);
+            assert_no_money(&render_csv(&report, sections));
+            assert_no_money(&render_md(&report, sections));
+            let parts = xlsx_text(&render_xlsx(&report, sections).expect("xlsx"));
+            assert!(!parts["xl/workbook.xml"].contains(OVERTIME));
+            for text in parts.values() {
+                for needle in ["287.35", "3448.2", "6896.4", "Pago", "Tarifa", OVERTIME, "&quot;$&quot;"] {
+                    assert!(!text.contains(needle), "{needle} leaked");
+                }
+            }
+        }
+        let plain = self::report();
+        let sections = plain.sections(&with_pay(), GroupBy::Project);
+        assert!(!sections.pay);
+        assert_no_money(&render_md(&plain, sections));
+    }
+
+    #[test]
+    fn csv_with_pay_appends_an_overtime_block_after_a_blank_line() {
+        let report = overtime_report();
+        let text = render_csv(&report, report.sections(&with_pay(), GroupBy::Project));
+        assert!(text.contains("\r\n\r\nHoras extra\r\n"));
+        let rows = parse_csv(&text);
+        let start = rows.iter().position(|row| row == &[OVERTIME]).expect("block");
+        assert_eq!(start, 7);
+        assert_eq!(
+            rows[start + 1],
+            ["Mes", "Estado", "Estimadas (h)", "Esperadas (h)", "Extra (h)", "Pago ×1 (MXN)", "Pago ×2 (MXN)"]
+        );
+        assert_eq!(rows[start + 2], ["2026-09", "cerrado", "172.00", "160.00", "12.00", "3448.20", "6896.40"]);
+        assert_eq!(rows[start + 3], ["2026-10", "en curso", "20.00", "160.00", "0.00", "0.00", "0.00"]);
+        assert_eq!(rows[start + 4], ["Total", "", "192.00", "320.00", "12.00", "3448.20", "6896.40"]);
+        assert_eq!(rows[start + 5], ["Tarifa por hora (MXN)", "287.35"]);
+        assert_eq!(rows[start + 6], ["Multiplicador", "2"]);
+        assert_eq!(rows[start + 7], [PARTIAL_NOTE]);
+        assert_eq!(rows.len(), start + 8);
+        assert!(rows[..start].iter().all(|row| row.len() == 9));
+    }
+
+    #[test]
+    fn markdown_with_pay_adds_an_overtime_table() {
+        let report = overtime_report();
+        let text = render_md(&report, report.sections(&with_pay(), GroupBy::Project));
+        assert!(text.contains("## Horas extra"));
+        assert!(text.contains("**Tarifa por hora:** $287.35 MXN · **Multiplicador:** ×2"));
+        assert!(text.contains("| Mes | Estado | Estimadas (h) | Esperadas (h) | Extra (h) | Pago ×1 (MXN) | Pago ×2 (MXN) |"));
+        assert!(text.contains("| 2026-09 | cerrado | 172.0 | 160.0 | 12.0 | $3,448.20 | $6,896.40 |"));
+        assert!(text.contains("| 2026-10 | en curso | 20.0 | 160.0 | 0.0 | $0.00 | $0.00 |"));
+        assert!(text.contains("| **Total** | — | **192.0** | **320.0** | **12.0** | **$3,448.20** | **$6,896.40** |"));
+        let tables = table_widths(&text);
+        assert_eq!(tables.len(), 4);
+        for table in tables {
+            assert!(table.iter().all(|width| *width == table[0]), "{table:?}");
+        }
+
+        let mut view = fixture();
+        view["overtime"] = serde_json::json!({"hourlyRate": 287.35, "problem": "Actualiza tally a 0.4 para calcular horas extra"});
+        let pending = normalize(serde_json::from_value(view).expect("view"));
+        let text = render_md(&pending, pending.sections(&with_pay(), GroupBy::Project));
+        assert!(text.contains("## Horas extra\n\nActualiza tally a 0.4 para calcular horas extra\n"));
+        assert!(!text.contains("287.35"));
+        let csv = render_csv(&pending, pending.sections(&with_pay(), GroupBy::Project));
+        assert!(csv.ends_with("\r\nHoras extra\r\nActualiza tally a 0.4 para calcular horas extra\r\n"));
+        assert!(!csv.contains("287.35"));
+        let parts = xlsx_text(&render_xlsx(&pending, pending.sections(&with_pay(), GroupBy::Project)).expect("xlsx"));
+        assert!(parts["xl/sharedStrings.xml"].contains("Actualiza tally a 0.4"));
+        assert!(!overtime_sheet(&parts).contains("287.35"));
+
+        let mut view = overtime_fixture();
+        view["overtime"]["currency"] = Value::from("CHF");
+        view["overtime"]["multiplier"] = Value::Null;
+        let foreign = normalize(serde_json::from_value(view).expect("view"));
+        let text = render_md(&foreign, foreign.sections(&with_pay(), GroupBy::Project));
+        assert!(text.contains("**Tarifa por hora:** 287.35 CHF · **Multiplicador:** ×2"));
+        assert!(text.contains("| 3,448.20 | 6,896.40 |"));
+        assert_eq!(factor(1.3333333), "1.33");
+        assert_eq!(factor(1.5), "1.5");
+    }
+
+    #[test]
+    fn xlsx_with_pay_adds_an_overtime_sheet_with_currency_format() {
+        let report = overtime_report();
+        let parts = xlsx_text(&render_xlsx(&report, report.sections(&with_pay(), GroupBy::Project)).expect("xlsx"));
+        assert!(parts["xl/workbook.xml"].contains("name=\"Horas extra\""));
+        assert!(parts["xl/styles.xml"].contains("formatCode=\"&quot;$&quot;#,##0.00\""));
+        assert!(parts["xl/sharedStrings.xml"].contains("Pago ×2 (MXN)"));
+        assert!(parts["xl/sharedStrings.xml"].contains("Tarifa por hora (MXN)"));
+        assert!(parts["xl/sharedStrings.xml"].contains("en curso"));
+        let sheet = overtime_sheet(&parts);
+        for value in ["<v>3448.2</v>", "<v>6896.4</v>", "<v>287.35</v>", "<v>12</v>"] {
+            assert!(sheet.contains(value), "{value} missing");
+        }
+    }
+
+    #[test]
     #[ignore]
     fn writes_all_three_formats_for_inspection() {
         let root = std::env::var("DEN_REPORT_EXPORT_DIR")
@@ -1156,5 +1650,38 @@ mod tests {
             assert!(workbook.contains(&format!("name=\"{sheet}\"")), "{sheet} missing");
         }
         println!("{}\n{}\n{}", csv_path.display(), md_path.display(), xlsx_path.display());
+
+        let pay = with_pay();
+        let paid_csv = write_report(&root, ExportFormat::Csv, overtime_fixture(), &pay, GroupBy::Project, Some("e2e-pago")).expect("csv");
+        let paid_md = write_report(&root, ExportFormat::Md, overtime_fixture(), &pay, GroupBy::Project, Some("e2e-pago")).expect("md");
+        let paid_xlsx = write_report(&root, ExportFormat::Xlsx, overtime_fixture(), &pay, GroupBy::Project, Some("e2e-pago")).expect("xlsx");
+        let unpaid_csv = write_report(&root, ExportFormat::Csv, overtime_fixture(), &all(), GroupBy::Project, Some("e2e-sin-pago")).expect("csv");
+        let unpaid_md = write_report(&root, ExportFormat::Md, overtime_fixture(), &all(), GroupBy::Project, Some("e2e-sin-pago")).expect("md");
+        let unpaid_xlsx = write_report(&root, ExportFormat::Xlsx, overtime_fixture(), &all(), GroupBy::Project, Some("e2e-sin-pago")).expect("xlsx");
+
+        let rows = parse_csv(&fs::read_to_string(&paid_csv).expect("csv text"));
+        assert!(rows.iter().any(|row| row[0] == "2026-09" && row[5] == "3448.20"));
+        assert_no_money(&fs::read_to_string(&unpaid_csv).expect("csv text"));
+        let paid_text = fs::read_to_string(&paid_md).expect("md text");
+        assert!(paid_text.contains("## Horas extra"));
+        for table in table_widths(&paid_text) {
+            assert!(table.iter().all(|width| *width == table[0]));
+        }
+        assert_no_money(&fs::read_to_string(&unpaid_md).expect("md text"));
+        let list = |path: &Path| {
+            let output = std::process::Command::new("unzip").arg("-l").arg(path).output().expect("unzip -l");
+            String::from_utf8_lossy(&output.stdout).to_string()
+        };
+        let workbook = |path: &Path| {
+            let output = std::process::Command::new("unzip").arg("-p").arg(path).arg("xl/workbook.xml").output().expect("unzip -p");
+            String::from_utf8_lossy(&output.stdout).to_string()
+        };
+        assert!(list(&paid_xlsx).contains("xl/worksheets/sheet5.xml"));
+        assert!(!list(&unpaid_xlsx).contains("xl/worksheets/sheet5.xml"));
+        assert!(workbook(&paid_xlsx).contains("name=\"Horas extra\""));
+        assert!(!workbook(&unpaid_xlsx).contains(OVERTIME));
+        for path in [&paid_csv, &paid_md, &paid_xlsx, &unpaid_csv, &unpaid_md, &unpaid_xlsx] {
+            println!("{}", path.display());
+        }
     }
 }

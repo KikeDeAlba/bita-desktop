@@ -1223,6 +1223,7 @@ export interface ReportExportInclude {
   projects?: boolean
   entries?: boolean
   jira?: boolean
+  pay?: boolean
 }
 
 export type ReportGroupBy = 'project' | 'day' | 'week'
