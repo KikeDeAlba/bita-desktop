@@ -16,6 +16,7 @@ mod meeting;
 mod notes_cmd;
 mod panel;
 mod pdf;
+mod report_export;
 mod platform;
 mod proposals;
 mod recap;
@@ -105,6 +106,7 @@ fn main() {
             media::storage_report,
             media::reveal_in_finder,
             pdf::export_pdf,
+            report_export::export_report,
             atlassian_cmd::atlassian_sites,
             atlassian_cmd::atlassian_site_add,
             atlassian_cmd::atlassian_site_test,

@@ -1216,6 +1216,27 @@ export function exportPdf(fileName: string): Promise<string> {
   return invoke<string>('export_pdf', { fileName })
 }
 
+export type ReportExportFormat = 'csv' | 'md' | 'xlsx'
+
+export interface ReportExportInclude {
+  charts?: boolean
+  projects?: boolean
+  entries?: boolean
+  jira?: boolean
+}
+
+export type ReportGroupBy = 'project' | 'day' | 'week'
+
+export function exportReport(
+  format: ReportExportFormat,
+  report: unknown,
+  include: ReportExportInclude = {},
+  groupBy: ReportGroupBy = 'project',
+  fileName?: string,
+): Promise<string> {
+  return invoke<string>('export_report', { format, report, include, groupBy, fileName: fileName ?? null })
+}
+
 export function revealInFinder(path: string): Promise<void> {
   return invoke<void>('reveal_in_finder', { path })
 }
