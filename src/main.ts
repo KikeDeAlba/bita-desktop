@@ -17,6 +17,7 @@ import {
   pendingProposals,
   onSnapshot,
   openNotes,
+  openReports,
   pending,
   projects,
   jiraProjects,
@@ -64,6 +65,7 @@ const launchKind = must<HTMLElement>('#launch-kind')
 const tabStrip = must<HTMLElement>('.tabs')
 const gear = must<HTMLButtonElement>('#open-settings')
 const notesButton = must<HTMLButtonElement>('#open-notes')
+const reportsButton = must<HTMLButtonElement>('#open-reports')
 
 let tab: Tab = 'ahora'
 let latest: Snapshot = { running: [], todaySeconds: 0, problem: null }
@@ -111,6 +113,7 @@ function applyModules(): void {
   launchKind.hidden = !enabled('meetingKinds')
   if (!enabled('meetingKinds') && launchKindValue !== '') setLaunchKind('')
   notesButton.hidden = !enabled('notes')
+  reportsButton.hidden = !enabled('timers')
   if (!visibleTabs().includes(tab)) {
     tab = 'ahora'
     for (const button of tabStrip.querySelectorAll<HTMLButtonElement>('[role="tab"]')) {
@@ -648,6 +651,10 @@ async function start(): Promise<void> {
 
   notesButton.addEventListener('click', () => {
     void openNotes(null)
+  })
+
+  reportsButton.addEventListener('click', () => {
+    void openReports()
   })
 
   gear.addEventListener('click', () => {

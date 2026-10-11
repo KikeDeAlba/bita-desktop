@@ -50,6 +50,7 @@ const ICONS: Record<string, IconShape> = {
     stroke: true,
     path: '<path d="M9 1.9H4.3a1.2 1.2 0 0 0-1.2 1.2v9.8a1.2 1.2 0 0 0 1.2 1.2h7.4a1.2 1.2 0 0 0 1.2-1.2V5.9Z"/><path d="M9 1.9v4h3.9M5.6 8.6h4.8M5.6 11h3.2"/>',
   },
+  chart: { view: '0 0 16 16', stroke: true, weight: 1.4, path: '<path d="M2.2 13.8h11.6M4.6 11.2V8M8 11.2V3.6M11.4 11.2V6.2"/>' },
   chevronRight: { view: '0 0 16 16', stroke: true, path: '<path d="M6.2 3.6 10.6 8l-4.4 4.4"/>' },
   chevronDown: { view: '0 0 16 16', stroke: true, path: '<path d="M3.6 6.2 8 10.6l4.4-4.4"/>' },
   prev: { view: '0 0 16 16', stroke: true, path: '<path d="M9.8 3.8 5.6 8l4.2 4.2"/>' },
