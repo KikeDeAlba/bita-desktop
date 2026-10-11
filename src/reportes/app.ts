@@ -1,5 +1,5 @@
 import type { PresetId, RangeChoice } from './model.ts'
-import type { ExportFormat, ExportInclude, GroupBy, ReportView } from './types.ts'
+import type { ExportFormat, ExportInclude, GroupBy, PaySettings, ReportView } from './types.ts'
 
 export type Grouping = 'day' | 'week' | 'month'
 
@@ -32,6 +32,23 @@ export interface ExportState extends Remote {
   busy: boolean
 }
 
+export interface PayDraft {
+  salary: string
+  currency: string
+  hours: string
+  multiplier: string
+  excluded: Set<number>
+}
+
+export interface PayState {
+  settings: PaySettings | null
+  error: unknown
+  open: boolean
+  draft: PayDraft | null
+  saving: boolean
+  status: string | null
+}
+
 export interface App {
   view: View
   choice: RangeChoice
@@ -44,6 +61,7 @@ export interface App {
   copied: boolean
   detail: DetailState | null
   exporting: ExportState | null
+  pay: PayState
   today: string
   render(): void
   navigate(view: View): void
@@ -51,4 +69,6 @@ export interface App {
   applyRange(choice: RangeChoice): void
   reload(): void
   openExport(scope: { projectId: number | null } | null): void
+  openPay(): void
+  closePay(): void
 }

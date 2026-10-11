@@ -267,6 +267,53 @@ export interface JiraTotals {
   pendingSeconds: number
   excludedSeconds: number
   nonJiraSeconds: number
+  estimateSeconds?: number
+}
+
+export interface Pay {
+  monthlySalary: number | null
+  currency: string
+  monthlyHours: number
+  multiplier: number
+  excludedProjects: number[]
+}
+
+export interface OvertimeProject {
+  projectId: number | null
+  name: string | null
+  estimateSeconds: number
+  counts: boolean
+}
+
+export interface OvertimeMonth {
+  month: string
+  from: string
+  to: string
+  partial: boolean
+  estimateSeconds: number
+  expectedSeconds: number
+  overtimeSeconds: number
+  payX1: number
+  payMultiplied: number
+  byProject: OvertimeProject[]
+}
+
+export interface OvertimeTotals {
+  estimateSeconds: number
+  expectedSeconds: number
+  overtimeSeconds: number
+  payX1: number
+  payMultiplied: number
+}
+
+export interface Overtime {
+  currency: string
+  hourlyRate: number
+  multiplier: number
+  monthlyHours: number
+  months: OvertimeMonth[]
+  totals: OvertimeTotals
+  problem: string | null
 }
 
 export interface ReportView {
@@ -282,6 +329,7 @@ export interface ReportView {
   jiraAvailable: boolean
   jiraTotals: JiraTotals | null
   jiraProblem: string | null
+  overtime: Overtime | null
 }
 
 export interface ReportRequest {
@@ -294,6 +342,14 @@ export interface ReportRequest {
 
 export function report(request: ReportRequest = {}): Promise<ReportView> {
   return invoke<ReportView>('report', { ...request })
+}
+
+export function getPay(): Promise<Pay> {
+  return invoke<Pay>('get_pay')
+}
+
+export function setPay(pay: Pay): Promise<Pay> {
+  return invoke<Pay>('set_pay', { pay })
 }
 
 export function scopes(): Promise<Scope[]> {
@@ -1223,6 +1279,7 @@ export interface ReportExportInclude {
   projects?: boolean
   entries?: boolean
   jira?: boolean
+  pay?: boolean
 }
 
 export type ReportGroupBy = 'project' | 'day' | 'week'

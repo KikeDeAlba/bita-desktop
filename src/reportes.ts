@@ -1,10 +1,12 @@
+import { describeProblem } from './bita.ts'
 import { element, must } from './dom.ts'
 import type { App, ExportState, View } from './reportes/app.ts'
 import { dashboard } from './reportes/dashboard.ts'
 import { detail } from './reportes/detail.ts'
 import { exportView } from './reportes/export.ts'
+import { draftFrom, loadPay, payPanel } from './reportes/pay.ts'
 import { localToday, presetChoice, projectKey, rangeQuery, type PresetId, type RangeChoice } from './reportes/model.ts'
-import { fetchReport, type ReportView } from './reportes/types.ts'
+import { DEFAULT_PAY, fetchReport, type ReportView } from './reportes/types.ts'
 
 const root = must<HTMLDivElement>('#reportes')
 const today = localToday()
@@ -22,6 +24,7 @@ const app: App = {
   copied: false,
   detail: null,
   exporting: null,
+  pay: { settings: null, error: null, open: false, draft: null, saving: false, status: null },
   today,
   render,
   navigate,
@@ -29,6 +32,8 @@ const app: App = {
   applyRange,
   reload: loadMain,
   openExport,
+  openPay,
+  closePay,
 }
 
 function render(): void {
@@ -43,6 +48,7 @@ function render(): void {
   strip.setAttribute('aria-hidden', 'true')
   const page = app.view.name === 'dashboard' ? dashboard(app) : app.view.name === 'detail' ? detail(app, app.view.projectId) : exportView(app, loadExport)
   root.replaceChildren(strip, page)
+  if (app.pay.open && app.view.name === 'dashboard') root.append(payPanel(app, app.main.report?.projects ?? []))
   root.dataset['view'] = app.view.name
 
   root.scrollTop = scroll
@@ -58,6 +64,24 @@ function navigate(view: View): void {
   app.view = view
   if (view.name === 'detail') loadDetail(view.projectId)
   render()
+}
+
+function openPay(): void {
+  if (app.pay.open) return
+  app.pay.open = true
+  app.pay.status = app.pay.error === null ? null : `No se pudo leer tu pago guardado: ${describeProblem(app.pay.error).message}`
+  app.pay.draft = draftFrom(app.pay.settings ?? DEFAULT_PAY)
+  render()
+  root.querySelector<HTMLElement>('[data-key="pay-salary"]')?.focus()
+}
+
+function closePay(): void {
+  if (!app.pay.open || app.pay.saving) return
+  app.pay.open = false
+  app.pay.draft = null
+  app.pay.status = null
+  render()
+  root.querySelector<HTMLElement>('[data-key="pay-open"]')?.focus()
 }
 
 function selectPreset(preset: PresetId): void {
@@ -137,7 +161,7 @@ function openExport(scope: { projectId: number | null } | null): void {
     choice: resolved(app.choice),
     format: app.exporting?.format ?? 'pdf',
     groupBy: app.exporting?.groupBy ?? 'project',
-    include: app.exporting?.include ?? { charts: true, projects: true, entries: true, jira: false },
+    include: app.exporting?.include ?? { charts: true, projects: true, entries: true, jira: false, pay: false },
     destination: app.exporting?.destination === 'clipboard' ? 'clipboard' : 'downloads',
     only,
     excluded: new Set(scope === null ? app.excluded : []),
@@ -177,9 +201,17 @@ function loadExport(): void {
 }
 
 document.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape' || app.view.name === 'dashboard') return
+  if (event.key !== 'Escape') return
+  if (app.pay.open) {
+    closePay()
+    return
+  }
+  if (app.view.name === 'dashboard') return
   if (app.exporting?.busy === true) return
   navigate({ name: 'dashboard' })
 })
 
 loadMain()
+void loadPay(app).then(() => {
+  if (app.view.name === 'dashboard') render()
+})
