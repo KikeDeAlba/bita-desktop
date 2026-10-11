@@ -1,0 +1,17 @@
+body:has(#reportes) {
+  background: var(--bg);
+}
+
+#reportes {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: var(--bg);
+}
+
+#reportes .reportes-loading {
+  margin: 0;
+  color: var(--fg-mute);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
