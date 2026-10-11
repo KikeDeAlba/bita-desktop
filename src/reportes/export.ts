@@ -1,9 +1,9 @@
 import { copyText, describeProblem, exportPdf } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import type { App, Destination, ExportState } from './app.ts'
-import { dateField } from './dashboard.ts'
+import { dateField, overtimeCurrency } from './dashboard.ts'
 import { colorMap, filterReport, OTHERS_COLOR, plural, presetChoice, projectKey, projectLabel, summaryText, type PresetId } from './model.ts'
-import { paper } from './paper.ts'
+import { paper, type PaperOptions } from './paper.ts'
 import { exportReport, type ExportFormat, type ExportInclude, type GroupBy, type ReportView } from './types.ts'
 import { button, loading, problemState, segmented } from './ui.ts'
 
@@ -21,6 +21,7 @@ const SECTIONS: { id: keyof ExportInclude | 'notes'; name: string; hint: string 
   { id: 'projects', name: 'Tabla por proyecto', hint: 'horas, porcentaje, entradas y promedio' },
   { id: 'entries', name: 'Detalle de entradas', hint: 'título, inicio y duración de cada una' },
   { id: 'jira', name: 'Estado en Jira', hint: 'issue y worklogs registrados por tally' },
+  { id: 'pay', name: 'Incluir pago', hint: 'horas extra y montos por mes' },
   { id: 'notes', name: 'Notas de inkwell', hint: 'Den todavía no las exporta' },
 ]
 
@@ -147,12 +148,18 @@ function form(app: App, state: ExportState, reload: () => void): HTMLElement {
 
   const include = fieldset('Incluir', 'report-fieldset--tight')
   const jiraAvailable = state.report?.jiraAvailable ?? app.main.report?.jiraAvailable ?? false
+  const payAvailable = hasOvertime(state)
   for (const section of SECTIONS) {
-    const disabled = section.id === 'notes' || (section.id === 'jira' && !jiraAvailable)
+    const disabled = section.id === 'notes' || (section.id === 'jira' && !jiraAvailable) || (section.id === 'pay' && !payAvailable)
     const row = element('div', 'report-switch-row')
     const text = element('span', 'report-switch-text')
     const jiraProblem = state.report?.jiraProblem ?? null
-    const hint = section.id === 'jira' && !jiraAvailable ? (jiraProblem ?? 'necesita tally 0.3 con status') : section.hint
+    const hint =
+      section.id === 'jira' && !jiraAvailable
+        ? (jiraProblem ?? 'necesita tally 0.3 con status')
+        : section.id === 'pay' && !payAvailable
+          ? 'configura tu pago en el reporte para incluirlo'
+          : section.hint
     text.append(element('span', 'report-switch-name', section.name), element('span', 'report-switch-hint', hint))
     const toggle = element('button', 'switch') as HTMLButtonElement
     toggle.type = 'button'
@@ -304,12 +311,28 @@ function preview(app: App, state: ExportState, reload: () => void): HTMLElement 
     return section
   }
   const colors = state.report === null ? new Map<string, string>() : colorMap(state.report)
-  section.append(paper(report, { include: effectiveInclude(state), groupBy: state.groupBy, generated: app.today, colors }))
+  section.append(paper(report, paperOptions(app, state, colors)))
   return section
 }
 
+function hasOvertime(state: ExportState): boolean {
+  const overtime = state.report?.overtime ?? null
+  return overtime !== null && overtime.months.length > 0
+}
+
 function effectiveInclude(state: ExportState): ExportInclude {
-  return { ...state.include, jira: state.include.jira && (state.report?.jiraAvailable ?? false) }
+  return { ...state.include, jira: state.include.jira && (state.report?.jiraAvailable ?? false), pay: state.include.pay && hasOvertime(state) }
+}
+
+function paperOptions(app: App, state: ExportState, colors: Map<string, string>): PaperOptions {
+  const overtime = state.report?.overtime ?? null
+  return {
+    include: effectiveInclude(state),
+    groupBy: state.groupBy,
+    generated: app.today,
+    colors,
+    currency: overtime === null ? 'MXN' : overtimeCurrency(app, overtime),
+  }
 }
 
 function fileBase(state: ExportState): string {
@@ -341,7 +364,9 @@ async function run(app: App, state: ExportState): Promise<void> {
       const path = await printPdf(app, state, report)
       state.status = { text: `Guardado en ${tilde(path)}`, error: false }
     } else {
-      const path = await exportReport(state.format, report, effectiveInclude(state), state.groupBy, fileBase(state))
+      const include = effectiveInclude(state)
+      const payload = include.pay ? report : { ...report, overtime: null }
+      const path = await exportReport(state.format, payload, include, state.groupBy, fileBase(state))
       state.status = { text: `Guardado en ${tilde(path)}`, error: false }
     }
   } catch (error) {
@@ -358,7 +383,7 @@ async function printPdf(app: App, state: ExportState, report: ReportView): Promi
   const root = element('div', 'print-root')
   root.id = 'print-root'
   const colors = state.report === null ? new Map<string, string>() : colorMap(state.report)
-  root.append(paper(report, { include: effectiveInclude(state), groupBy: state.groupBy, generated: app.today, colors }))
+  root.append(paper(report, paperOptions(app, state, colors)))
   host.append(root)
   try {
     document.body.classList.add('printing')

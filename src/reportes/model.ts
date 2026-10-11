@@ -1,5 +1,5 @@
 import { projectColor } from '../tabs.ts'
-import type { ProjectSeconds, RangeQuery, ReportEntry, ReportProject, ReportView } from './types.ts'
+import type { Overtime, OvertimeTotals, ProjectSeconds, RangeQuery, ReportEntry, ReportProject, ReportView } from './types.ts'
 
 export type PresetId = 'week' | 'month' | '30d' | 'quarter' | 'custom'
 
@@ -272,4 +272,31 @@ export function summaryText(report: ReportView, preset: PresetId | null): string
     lines.push(`- ${projectLabel(project)}: ${hours(project.totalSeconds)} (${percent(project.totalSeconds, report.totalSeconds)})`)
   }
   return lines.join('\n')
+}
+
+export function money(amount: number, currency: string): string {
+  try {
+    return new Intl.NumberFormat('es-MX', { style: 'currency', currency }).format(amount)
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`
+  }
+}
+
+export function multiplierLabel(multiplier: number): string {
+  return `×${Number(multiplier.toFixed(2))}`
+}
+
+export function overtimeTotals(overtime: Overtime): OvertimeTotals {
+  if (overtime.totals !== undefined && overtime.totals !== null) return overtime.totals
+  const zero: OvertimeTotals = { estimateSeconds: 0, expectedSeconds: 0, overtimeSeconds: 0, payX1: 0, payMultiplied: 0 }
+  return overtime.months.reduce(
+    (sum, month) => ({
+      estimateSeconds: sum.estimateSeconds + month.estimateSeconds,
+      expectedSeconds: sum.expectedSeconds + month.expectedSeconds,
+      overtimeSeconds: sum.overtimeSeconds + month.overtimeSeconds,
+      payX1: sum.payX1 + month.payX1,
+      payMultiplied: sum.payMultiplied + month.payMultiplied,
+    }),
+    zero,
+  )
 }

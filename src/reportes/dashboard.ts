@@ -1,5 +1,5 @@
 import { copyText, describeProblem } from '../bita.ts'
-import { element } from '../dom.ts'
+import { element, icon } from '../dom.ts'
 import type { App, Grouping } from './app.ts'
 import {
   colorMap,
@@ -11,6 +11,10 @@ import {
   jiraSummary,
   LONG_DAY_HOURS,
   monthBuckets,
+  monthLabel,
+  money,
+  multiplierLabel,
+  overtimeTotals,
   OTHERS_COLOR,
   overlapFor,
   percent,
@@ -26,7 +30,7 @@ import {
   filterReport,
   type Bucket,
 } from './model.ts'
-import type { ReportProject, ReportView } from './types.ts'
+import type { Overtime, ReportProject, ReportView } from './types.ts'
 import {
   barRows,
   button,
@@ -203,7 +207,9 @@ function main(app: App): HTMLElement {
     copy.dataset['key'] = 'copy'
     const exportButton = primaryAction('Exportar', () => app.openExport(null))
     exportButton.dataset['key'] = 'export'
-    header.append(copy, exportButton)
+    header.append(payButton(app), copy, exportButton)
+  } else {
+    header.append(payButton(app))
   }
   section.append(header)
 
@@ -231,11 +237,109 @@ function main(app: App): HTMLElement {
   const colors = colorMap(report)
   if (full.jiraProblem !== null) section.append(notice(full.jiraProblem))
   section.append(summary(report))
+  const overtime = full.overtime ?? null
+  if (overtime !== null) section.append(overtimeCard(overtime, overtimeCurrency(app, overtime)))
+  else if (app.pay.settings !== null && app.pay.settings.monthlySalary === null) section.append(payBanner(app))
   section.append(hoursChart(app, report))
   const pair = element('div', 'report-pair')
   pair.append(weeklyChart(report, colors), distribution(report, colors))
   section.append(pair)
   section.append(projectTable(app, report, colors, full))
+  return section
+}
+
+function payButton(app: App): HTMLButtonElement {
+  const node = button('Pago', 'ghost-button', () => app.openPay())
+  node.dataset['key'] = 'pay-open'
+  node.setAttribute('aria-haspopup', 'dialog')
+  node.setAttribute('aria-label', 'Configurar pago y horas extra')
+  return node
+}
+
+function payBanner(app: App): HTMLElement {
+  const box = element('div', 'banner banner--quiet report-pay-banner')
+  box.setAttribute('role', 'status')
+  const setup = button('Configurar pago', 'quiet-link', () => app.openPay())
+  setup.dataset['key'] = 'pay-setup'
+  box.append(icon('clock', 13), element('span', 'banner-text report-grow', 'Configura tu pago para ver horas extra'), setup)
+  return box
+}
+
+export function overtimeCurrency(app: App, overtime: Overtime): string {
+  return overtime.currency ?? app.pay.settings?.currency ?? 'MXN'
+}
+
+function overtimeCard(overtime: Overtime, currency: string): HTMLElement {
+  const section = element('section', 'report-card report-table-card report-overtime')
+  section.setAttribute('aria-label', 'Horas extra')
+  const head = element('div', 'report-table-head')
+  const factor = multiplierLabel(overtime.multiplier)
+  head.append(
+    element('h2', 'report-card-title report-grow', 'Horas extra'),
+    element('span', 'report-meta', `tu hora ${money(overtime.hourlyRate, currency)} · sobre el tiempo estimado`),
+  )
+  section.append(head)
+  const problem = overtime.problem ?? null
+  if (problem !== null && problem !== '') section.append(notice(problem))
+  if (overtime.months.length === 0) {
+    if (problem === null || problem === '') section.append(element('p', 'report-meta report-overtime-empty', 'Sin meses que calcular en este rango'))
+    return section
+  }
+
+  const scroll = element('div', 'report-table-scroll')
+  const table = element('table', 'report-table report-overtime-table')
+  const caption = element('caption', 'report-sr', `Horas extra por mes, pago ×1 y ${factor}`)
+  const thead = element('thead')
+  const headRow = element('tr')
+  const columns: [string, string][] = [
+    ['Mes', ''],
+    ['Estimadas', 'report-right'],
+    ['Esperadas', 'report-right'],
+    ['Extra', 'report-right'],
+    ['Pago ×1', 'report-right'],
+    [`Pago ${factor}`, 'report-right'],
+  ]
+  for (const [label, className] of columns) {
+    const th = element('th', className, label)
+    th.setAttribute('scope', 'col')
+    headRow.append(th)
+  }
+  thead.append(headRow)
+  const body = element('tbody')
+  for (const month of overtime.months) {
+    const row = element('tr')
+    const name = element('th', 'report-overtime-month')
+    name.setAttribute('scope', 'row')
+    name.append(element('span', undefined, monthLabel(month.month)))
+    if (month.partial) name.append(element('span', 'tag report-tag--pending', 'en curso'))
+    const extra = month.overtimeSeconds > 0
+    row.append(
+      name,
+      element('td', 'report-right report-num', hours(month.estimateSeconds)),
+      element('td', 'report-right report-num report-num--dim', hours(month.expectedSeconds)),
+      element('td', `report-right report-num ${extra ? 'report-num--strong' : 'report-num--dim'}`, hours(month.overtimeSeconds)),
+      element('td', 'report-right report-num', money(month.payX1, currency)),
+      element('td', `report-right report-num ${extra ? 'report-num--strong' : ''}`.trim(), money(month.payMultiplied, currency)),
+    )
+    body.append(row)
+  }
+  const totals = overtimeTotals(overtime)
+  const foot = element('tfoot')
+  const total = element('tr', 'report-overtime-total')
+  const label = element('th', undefined, 'Total')
+  label.setAttribute('scope', 'row')
+  total.append(
+    label,
+    element('td', 'report-right report-num', hours(totals.estimateSeconds)),
+    element('td', 'report-right report-num report-num--dim', hours(totals.expectedSeconds)),
+    element('td', 'report-right report-num report-num--strong', hours(totals.overtimeSeconds)),
+    element('td', 'report-right report-num report-num--strong', money(totals.payX1, currency)),
+    element('td', 'report-right report-num report-num--strong', money(totals.payMultiplied, currency)),
+  )
+  foot.append(total)
+  table.append(caption, thead, body, foot)
+  scroll.append(table)
+  section.append(scroll)
   return section
 }
 
