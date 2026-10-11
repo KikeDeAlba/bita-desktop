@@ -15,6 +15,7 @@ mod live_wide;
 mod meeting;
 mod notes_cmd;
 mod panel;
+mod pay;
 mod pdf;
 mod report_export;
 mod platform;
@@ -71,6 +72,8 @@ fn main() {
             commands::worked,
             commands::pending,
             report::report,
+            pay::get_pay,
+            pay::set_pay,
             commands::scopes,
             commands::add_project,
             commands::set_scope,

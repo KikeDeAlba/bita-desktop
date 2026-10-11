@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use chrono::{Local, NaiveDate};
+use tauri::AppHandle;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{CallOptions, Cli};
 use crate::docs::Feature;
 use crate::model::{Overlap, Problem, ProblemKind};
+use crate::pay::{MonthSpec, Overtime, Pay, UPGRADE_TALLY_OVERTIME};
 use crate::registry::{Tool, ToolsStatus};
 
 const REPORT_TIMEOUT_SECONDS: u64 = 60;
+const OVERTIME_CONCURRENCY: usize = 4;
 const UPGRADE_BITA: &str = "Actualiza bita a 1.2 para ver reportes";
 const UPGRADE_TALLY: &str = "Actualiza tally a 0.3 para ver el estado en Jira";
 const PROJECT_COLORS: [&str; 5] = [
@@ -133,6 +136,8 @@ pub struct TallyProject {
     pub excluded_seconds: i64,
     #[serde(default)]
     pub non_jira_seconds: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
@@ -146,6 +151,8 @@ pub struct TallyTotals {
     pub excluded_seconds: i64,
     #[serde(default)]
     pub non_jira_seconds: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_seconds: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -229,6 +236,7 @@ pub struct ReportView {
     pub jira_available: bool,
     pub jira_totals: Option<TallyTotals>,
     pub jira_problem: Option<String>,
+    pub overtime: Option<Overtime>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -323,6 +331,7 @@ pub fn merge(report: BitaReport, status: Option<TallyStatus>) -> ReportView {
         jira_available,
         jira_totals: status.map(|status| status.totals),
         jira_problem: None,
+        overtime: None,
     }
 }
 
@@ -469,8 +478,71 @@ async fn tally_status(status: &ToolsStatus, args: &[String]) -> Result<Option<Ta
     call::<TallyStatus>(Tool::Tally, &cli, args).await.map(Some)
 }
 
+pub fn overtime_args(month: &MonthSpec) -> Vec<String> {
+    vec![
+        "status".to_string(),
+        "--from".to_string(),
+        month.from.format("%Y-%m-%d").to_string(),
+        "--to".to_string(),
+        month.to.format("%Y-%m-%d").to_string(),
+        "--include-running".to_string(),
+    ]
+}
+
+async fn monthly_overtime(
+    tools: &ToolsStatus,
+    range: &ReportRange,
+    pay: &Pay,
+    tally_failure: Option<&str>,
+) -> Option<Overtime> {
+    pay.monthly_salary?;
+    if let Some(failure) = tally_failure {
+        let problem = if failure == UPGRADE_TALLY { UPGRADE_TALLY_OVERTIME } else { failure };
+        return Some(Overtime::with_problem(pay, problem));
+    }
+    if crate::docs::refusal(Feature::Jira, tools).is_some() {
+        return None;
+    }
+    let today = Local::now().date_naive();
+    if tool_support(tools, Tool::Tally, STATUS_CAPABILITY) == Support::No {
+        return Some(Overtime::with_problem(pay, UPGRADE_TALLY_OVERTIME));
+    }
+    let from = NaiveDate::parse_from_str(&range.from_day, "%Y-%m-%d").ok()?;
+    let to = NaiveDate::parse_from_str(&range.to_day, "%Y-%m-%d").ok()?;
+    let cli = Cli::for_tool(Tool::Tally).await.ok()?;
+    let months = crate::pay::months_between(from, to, today);
+    let permits = std::sync::Arc::new(tokio::sync::Semaphore::new(OVERTIME_CONCURRENCY));
+    let mut jobs = tokio::task::JoinSet::new();
+    for (index, month) in months.iter().enumerate() {
+        let cli = cli.clone();
+        let args = overtime_args(month);
+        let permits = permits.clone();
+        jobs.spawn(async move {
+            let _permit = permits.acquire_owned().await;
+            (index, call::<TallyStatus>(Tool::Tally, &cli, &args).await)
+        });
+    }
+    let mut statuses: Vec<Option<TallyStatus>> = vec![None; months.len()];
+    while let Some(joined) = jobs.join_next().await {
+        let (index, result) = match joined {
+            Ok(done) => done,
+            Err(_) => return Some(Overtime::with_problem(pay, "No pude calcular las horas extra.")),
+        };
+        match result {
+            Ok(status) => statuses[index] = Some(status),
+            Err(problem) if problem.kind == ProblemKind::CliFailed && is_unknown_command(&problem) => {
+                return Some(Overtime::with_problem(pay, UPGRADE_TALLY_OVERTIME));
+            }
+            Err(problem) => return Some(Overtime::with_problem(pay, problem.message)),
+        }
+    }
+    let paired = months.into_iter().zip(statuses).filter_map(|(month, status)| Some((month, status?))).collect();
+    Some(crate::pay::overtime(paired, pay, today))
+}
+
 #[tauri::command]
 pub async fn report(
+    app: AppHandle,
     preset: Option<String>,
     from: Option<String>,
     to: Option<String>,
@@ -486,6 +558,8 @@ pub async fn report(
     let (status, jira_problem) = tally_outcome(status);
     let mut view = merge(report, status);
     view.jira_problem = jira_problem;
+    let pay = crate::pay::stored_pay(&app);
+    view.overtime = monthly_overtime(&tools, &view.range, &pay, view.jira_problem.as_deref()).await;
     Ok(view)
 }
 
@@ -787,5 +861,52 @@ mod tests {
         let other = bita_problem(Problem::new(ProblemKind::CliFailed, "No project 99. (USAGE_ERROR)"));
         assert_eq!(other.kind, ProblemKind::CliFailed);
         assert_eq!(other.message, "No project 99. (USAGE_ERROR)");
+    }
+    #[test]
+    fn overtime_asks_tally_for_one_calendar_month() {
+        let month = MonthSpec {
+            month: "2026-10".into(),
+            from: NaiveDate::from_ymd_opt(2026, 10, 1).unwrap(),
+            to: NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
+        };
+        assert_eq!(
+            overtime_args(&month),
+            ["status", "--from", "2026-10-01", "--to", "2026-10-10", "--include-running"]
+        );
+    }
+
+    #[test]
+    fn without_salary_or_tally_estimates_the_view_stays_as_before() {
+        let view = merge(bita(false), Some(tally(false)));
+        let json = serde_json::to_value(&view).expect("json");
+        assert!(json["overtime"].is_null());
+        assert!(json["jiraTotals"].get("estimateSeconds").is_none());
+    }
+
+    #[test]
+    fn tally_estimates_are_read_when_present() {
+        let mut value: serde_json::Value = serde_json::from_str(TALLY_STATUS).expect("fixture");
+        value["projects"][0]["estimateSeconds"] = 10800.into();
+        value["totals"]["estimateSeconds"] = 10800.into();
+        let status: TallyStatus = serde_json::from_value(value).expect("status");
+        assert_eq!(status.projects[0].estimate_seconds, Some(10800));
+        assert_eq!(status.projects[1].estimate_seconds, None);
+        assert_eq!(status.totals.estimate_seconds, Some(10800));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn no_salary_means_no_overtime() {
+        let tools = ToolsStatus {
+            registry_dir: String::new(),
+            tools: Vec::new(),
+            invalid: Vec::new(),
+            modules: crate::registry::Modules::default(),
+            inkwell_migrated: None,
+        };
+        let range: ReportRange = bita(false).range;
+        assert!(monthly_overtime(&tools, &range, &Pay::default(), None).await.is_none());
+        let paid = Pay { monthly_salary: Some(16000.0), ..Pay::default() };
+        let failed = monthly_overtime(&tools, &range, &paid, Some(UPGRADE_TALLY)).await.expect("overtime");
+        assert_eq!(failed.problem.as_deref(), Some(UPGRADE_TALLY_OVERTIME));
     }
 }
