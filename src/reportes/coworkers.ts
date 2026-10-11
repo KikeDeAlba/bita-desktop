@@ -1,6 +1,7 @@
 import { describeProblem } from '../bita.ts'
 import { element, icon } from '../dom.ts'
 import type { App, CoworkerForm, CoworkerState, ExcludesState } from './app.ts'
+import { coworkerExportState, exportPanel, issueLink } from './coworker-export.ts'
 import { dayLabel, hours, money, monthLabel, multiplierLabel, plural } from './model.ts'
 import {
   addOvertimeExclude,
@@ -28,6 +29,8 @@ export function coworkerState(today: string): CoworkerState {
     invalid: null,
     stale: false,
     result: null,
+    range: null,
+    exporting: coworkerExportState(),
     candidates: null,
     sites: [],
     sitesLoaded: false,
@@ -45,6 +48,8 @@ export function forgetSalary(state: CoworkerState): void {
   state.token++
   state.loading = false
   state.result = null
+  state.range = null
+  state.exporting = coworkerExportState()
   state.candidates = null
   state.error = null
   state.invalid = null
@@ -128,6 +133,8 @@ function consult(app: App): void {
   state.error = null
   state.candidates = null
   state.result = null
+  state.range = null
+  state.exporting = coworkerExportState()
   state.loading = true
   const token = ++state.token
   app.render()
@@ -135,7 +142,10 @@ function consult(app: App): void {
     .then((outcome) => {
       if (token !== state.token) return
       if (outcome.status === 'ambiguous') state.candidates = outcome.candidates
-      else state.result = outcome.overtime
+      else {
+        state.result = outcome.overtime
+        state.range = { from: query.fromMonth, to: query.toMonth }
+      }
     })
     .catch((error: unknown) => {
       if (token !== state.token) return
@@ -414,7 +424,7 @@ function results(app: App, state: CoworkerState): HTMLElement {
     return area
   }
   if (state.stale) area.append(notice('La lista de proyectos excluidos cambió · vuelve a consultar para recalcular'))
-  area.append(...overtimeResult(state.result, app.today.slice(0, 7)))
+  area.append(...overtimeResult(app, state, state.result, app.today.slice(0, 7)))
   return area
 }
 
@@ -445,7 +455,7 @@ function amount(value: number | null, currency: string): string {
   return value === null ? '—' : money(value, currency)
 }
 
-function overtimeResult(overtime: CoworkerOvertime, currentMonth: string): HTMLElement[] {
+function overtimeResult(app: App, state: CoworkerState, overtime: CoworkerOvertime, currentMonth: string): HTMLElement[] {
   const currency = overtime.rate.currency
   const factor = multiplierLabel(overtime.rate.multiplier)
   const paid = overtime.rate.hourlyRate !== null
@@ -460,7 +470,17 @@ function overtimeResult(overtime: CoworkerOvertime, currentMonth: string): HTMLE
     plural(issues.length, 'tarjeta', 'tarjetas'),
     paid ? `hora ${money(overtime.rate.hourlyRate ?? 0, currency)}` : 'sin sueldo · solo horas',
   ]
-  head.append(element('span', 'report-meta', meta.join(' · ')))
+  head.append(element('span', 'report-meta report-grow', meta.join(' · ')))
+  const open = button(state.exporting.open ? 'Ocultar exportar' : 'Exportar', 'ghost-button coworker-export-open', () => {
+    state.exporting.open = !state.exporting.open
+    state.exporting.status = null
+    app.render()
+    focus(state.exporting.open ? 'coworker-format-' + state.exporting.format : 'coworker-export-open')
+  })
+  open.dataset['key'] = 'coworker-export-open'
+  open.setAttribute('aria-expanded', String(state.exporting.open))
+  head.append(open)
+  const panel = state.exporting.open ? exportPanel(app, state, overtime) : null
 
   const summary = kpis(
     [
@@ -476,7 +496,7 @@ function overtimeResult(overtime: CoworkerOvertime, currentMonth: string): HTMLE
     170,
   )
 
-  return [head, summary, monthsTable(overtime, totals, currentMonth, paid), issuesCard(issues), missingCard(missing)].filter(
+  return [head, panel, summary, monthsTable(overtime, totals, currentMonth, paid), issuesCard(issues), missingCard(missing)].filter(
     (node): node is HTMLElement => node !== null,
   )
 }
@@ -582,8 +602,10 @@ function issueTable(issues: CoworkerIssue[], label: string, withEstimate: boolea
     const row = element('tr')
     const summary = element('td', 'coworker-summary', issue.summary)
     summary.title = issue.summary
+    const key = element('td', 'report-num coworker-key')
+    key.append(issueLink(issue, 'coworker-key-link'))
     row.append(
-      element('td', 'report-num coworker-key', issue.key),
+      key,
       summary,
       element('td', 'report-num report-num--dim', issue.project ?? '—'),
       element('td', 'report-num report-num--dim', issue.startDate === null ? '—' : dayLabel(issue.startDate.slice(0, 10), true)),
