@@ -97,7 +97,7 @@ src-tauri/target/debug/den --tools-status
 ## Instalación
 
 Cada versión se publica en
-[GitHub Releases](https://github.com/KikeDeAlba/bita-desktop/releases) como un
+[GitHub Releases](https://github.com/KikeDeAlba/den/releases) como un
 `.dmg` para Apple Silicon, firmado ad hoc y sin notarizar: la primera vez hay
 que abrirlo con clic derecho → Abrir. Para compilarlo tú mismo, sigue estos
 pasos.
@@ -114,8 +114,8 @@ Reinicia la terminal después de instalar Rust.
 ### 2. Clonar
 
 ```sh
-git clone git@github.com:KikeDeAlba/bita-desktop.git
-cd bita-desktop
+git clone git@github.com:KikeDeAlba/den.git
+cd den
 pnpm install
 ```
 
