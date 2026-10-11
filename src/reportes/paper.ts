@@ -9,7 +9,11 @@ import {
   jiraShare,
   jiraStatus,
   jiraSummary,
+  monthLabel,
+  money,
+  multiplierLabel,
   OTHERS_COLOR,
+  overtimeTotals,
   percent,
   plural,
   projectKey,
@@ -18,7 +22,7 @@ import {
   weekBuckets,
   type Bucket,
 } from './model.ts'
-import type { ExportInclude, GroupBy, ReportView } from './types.ts'
+import type { ExportInclude, GroupBy, Overtime, OvertimeTotals, ReportView } from './types.ts'
 
 const PAPER_BARS = 6
 
@@ -27,6 +31,7 @@ export interface PaperOptions {
   groupBy: GroupBy
   generated: string
   colors: Map<string, string>
+  currency: string
 }
 
 export function paper(report: ReportView, options: PaperOptions): HTMLElement {
@@ -67,6 +72,8 @@ export function paper(report: ReportView, options: PaperOptions): HTMLElement {
     sheet.append(projectBars(report, options.colors), dayColumns(report))
   }
   if (options.include.projects) sheet.append(groupTable(report, options.groupBy, jira))
+  const overtime = report.overtime ?? null
+  if (options.include.pay && overtime !== null && overtime.months.length > 0) sheet.append(overtimeTable(overtime, options.currency))
   if (options.include.entries) sheet.append(entryTable(report, jira))
 
   const footer = element('footer', 'paper-footer')
@@ -223,6 +230,37 @@ function entryTable(report: ReportView, jira: boolean): HTMLElement {
     cells(row, values)
     built.body.append(row)
   }
+  section.append(built.table)
+  return section
+}
+
+function overtimeTable(overtime: Overtime, currency: string): HTMLElement {
+  const section = block('Horas extra')
+  section.classList.add('paper-overtime')
+  const factor = multiplierLabel(overtime.multiplier)
+  section.append(element('p', 'paper-note', `Sobre el tiempo estimado · hora de ${money(overtime.hourlyRate, currency)}`))
+  const built = table([
+    ['Mes', false],
+    ['Estimadas', true],
+    ['Esperadas', true],
+    ['Extra', true],
+    ['Pago ×1', true],
+    [`Pago ${factor}`, true],
+  ])
+  const line = (label: string, values: OvertimeTotals, className?: string): HTMLElement => {
+    const row = element('tr', className)
+    cells(row, [
+      [label, 'paper-strong paper-nowrap'],
+      [hourValue(values.estimateSeconds), 'paper-right paper-num'],
+      [hourValue(values.expectedSeconds), 'paper-right paper-num'],
+      [hourValue(values.overtimeSeconds), 'paper-right paper-num paper-strong'],
+      [money(values.payX1, currency), 'paper-right paper-num'],
+      [money(values.payMultiplied, currency), 'paper-right paper-num paper-strong'],
+    ])
+    return row
+  }
+  for (const month of overtime.months) built.body.append(line(month.partial ? `${monthLabel(month.month)} (en curso)` : monthLabel(month.month), month))
+  built.body.append(line('Total', overtimeTotals(overtime), 'paper-total'))
   section.append(built.table)
   return section
 }

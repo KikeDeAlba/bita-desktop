@@ -82,6 +82,57 @@ export interface ReportView {
   jiraAvailable: boolean
   jiraTotals: JiraTotals | null
   jiraProblem: string | null
+  overtime?: Overtime | null | undefined
+}
+
+export interface OvertimeProject {
+  projectId: number
+  estimateSeconds: number
+  counts: boolean
+}
+
+export interface OvertimeMonth {
+  month: string
+  partial: boolean
+  estimateSeconds: number
+  expectedSeconds: number
+  overtimeSeconds: number
+  payX1: number
+  payMultiplied: number
+  byProject?: OvertimeProject[] | undefined
+}
+
+export interface OvertimeTotals {
+  estimateSeconds: number
+  expectedSeconds: number
+  overtimeSeconds: number
+  payX1: number
+  payMultiplied: number
+}
+
+export interface Overtime {
+  hourlyRate: number
+  multiplier: number
+  currency?: string | undefined
+  months: OvertimeMonth[]
+  totals?: OvertimeTotals | null | undefined
+  problem?: string | null | undefined
+}
+
+export interface PaySettings {
+  monthlySalary: number | null
+  currency: string
+  monthlyHours: number
+  multiplier: number
+  excludedProjects: number[]
+}
+
+export const DEFAULT_PAY: PaySettings = {
+  monthlySalary: null,
+  currency: 'MXN',
+  monthlyHours: 160,
+  multiplier: 2,
+  excludedProjects: [],
 }
 
 export type RangeQuery = { preset: 'week' | 'month' } | { from: string; to: string }
@@ -97,6 +148,7 @@ export interface ExportInclude {
   projects: boolean
   entries: boolean
   jira: boolean
+  pay: boolean
 }
 
 export function fetchReport(range: RangeQuery, projectId: number | null, entries: boolean): Promise<ReportView> {
@@ -113,4 +165,13 @@ export function exportReport(
   fileName: string,
 ): Promise<string> {
   return invoke<string>('export_report', { format, report, include, groupBy, fileName })
+}
+
+export async function getPay(): Promise<PaySettings> {
+  const pay = await invoke<Partial<PaySettings> | null>('get_pay')
+  return { ...DEFAULT_PAY, ...(pay ?? {}) }
+}
+
+export function setPay(pay: PaySettings): Promise<PaySettings | null> {
+  return invoke<PaySettings | null>('set_pay', { pay })
 }

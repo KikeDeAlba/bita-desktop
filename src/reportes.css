@@ -1338,6 +1338,18 @@ body:has(#reportes) {
   color: #7c6f64;
 }
 
+.paper-note {
+  margin: 0;
+  font-size: 10px;
+  color: #7c6f64;
+}
+
+.paper-table .paper-total td {
+  border-top: 1px solid #7c6f64;
+  color: #282828;
+  font-weight: 600;
+}
+
 .paper-footer {
   display: flex;
   justify-content: space-between;
@@ -1355,9 +1367,27 @@ body:has(#reportes) {
 }
 
 #print-root .paper {
+  width: 100%;
   max-width: none;
   padding: 0;
   border-radius: 0;
+  background: #fff;
+  color: #1d2021;
+}
+
+#print-root .paper-bar-track {
+  background: #ece8e1;
+}
+
+#print-root .paper-header,
+#print-root .paper-columns,
+#print-root .paper-table td,
+#print-root .paper-footer {
+  border-color: #d9d3c7;
+}
+
+#print-root .paper-table .paper-total td {
+  border-top-color: #7c6f64;
 }
 
 @media (max-width: 520px) {
@@ -1402,7 +1432,7 @@ body:has(#reportes) {
   body {
     height: auto !important;
     overflow: visible !important;
-    background: #fbf1c7 !important;
+    background: #fff !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
@@ -1411,7 +1441,8 @@ body:has(#reportes) {
     display: block !important;
     height: auto !important;
     overflow: visible !important;
-    background: #fbf1c7 !important;
+    background: #fff !important;
+    border-radius: 0 !important;
   }
 
   body.printing #reportes > :not(#print-root) {
@@ -1435,4 +1466,155 @@ body:has(#reportes) {
 .report-notice svg {
   flex-shrink: 0;
   color: var(--estimate);
+}
+
+.report-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.report-pay-banner {
+  margin: 0;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.report-pay-banner svg {
+  flex-shrink: 0;
+  color: var(--fg-mute);
+}
+
+.report-overtime .report-notice {
+  margin: 12px 16px 0;
+}
+
+.report-overtime-empty {
+  margin: 0;
+  padding: 12px 16px;
+}
+
+.report-overtime-table {
+  min-width: 620px;
+}
+
+.report-overtime-table tbody th,
+.report-overtime-table tfoot th {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg);
+  border-top: 1px solid var(--line-soft);
+}
+
+.report-overtime-month {
+  white-space: nowrap;
+}
+
+.report-overtime-month .tag {
+  margin-left: 8px;
+}
+
+.report-overtime-total th,
+.report-overtime-total td {
+  border-top: 1px solid var(--elev) !important;
+  font-weight: 600;
+  color: var(--fg-bright) !important;
+}
+
+.pay-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pay-sheet {
+  width: min(400px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  padding: 36px 22px 22px;
+  background: var(--card);
+  border-left: 1px solid var(--elev);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--fg);
+}
+
+.pay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pay-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-bright);
+}
+
+.pay-caption {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-mute);
+}
+
+.pay-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pay-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pay-field--wide {
+  grid-column: 1 / -1;
+}
+
+.pay-rate {
+  margin: -4px 0 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-dim);
+}
+
+.pay-projects .report-switch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pay-actions {
+  position: sticky;
+  bottom: -22px;
+  padding: 10px 0 0;
+  background: var(--card);
+}
+
+@media (max-width: 520px) {
+  .pay-sheet {
+    padding: 32px 16px 16px;
+    border-left: none;
+  }
+
+  .pay-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pay-actions {
+    bottom: -16px;
+  }
 }
