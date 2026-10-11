@@ -14,7 +14,8 @@ body:has(#reportes) {
 }
 
 #reportes button:focus-visible,
-#reportes input:focus-visible {
+#reportes input:focus-visible,
+#reportes a:focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 2px;
 }
@@ -1359,6 +1360,11 @@ body:has(#reportes) {
   color: #7c6f64;
 }
 
+.paper-link {
+  color: #076678;
+  text-decoration: underline;
+}
+
 #print-root {
   position: fixed;
   left: -12000px;
@@ -1782,6 +1788,51 @@ body:has(#reportes) {
 .coworker-key {
   white-space: nowrap;
   color: var(--fg-bright);
+}
+
+.coworker-key-link {
+  color: var(--blue);
+  text-decoration: none;
+  border-radius: 3px;
+}
+
+.coworker-key-link:hover {
+  color: var(--aqua);
+  text-decoration: underline;
+}
+
+.coworker-export {
+  padding: 16px;
+}
+
+.coworker-export-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.coworker-export-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.coworker-export-field .report-segmented {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.coworker-export-switches {
+  display: flex;
+  flex-direction: column;
+}
+
+.coworker-export-target {
+  margin: 0;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .coworker-summary {

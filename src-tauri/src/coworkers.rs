@@ -66,6 +66,8 @@ pub struct OvertimeIssue {
     pub start_date: Option<String>,
     #[serde(default)]
     pub estimate_seconds: Option<f64>,
+    #[serde(default, deserialize_with = "loose_url")]
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -112,6 +114,24 @@ pub struct CoworkerOvertime {
     pub months: Vec<CoworkerMonth>,
     #[serde(default)]
     pub totals: Option<CoworkerTotals>,
+    #[serde(default, deserialize_with = "loose_url")]
+    pub site_url: Option<String>,
+}
+
+impl CoworkerOvertime {
+    pub fn link_issues(&mut self) {
+        let site = self.site_url.as_deref().and_then(site_url);
+        for month in &mut self.months {
+            for issue in month.issues.iter_mut().chain(month.without_estimate.iter_mut()) {
+                issue.url = issue
+                    .url
+                    .as_deref()
+                    .and_then(|url| jira_url(url, &issue.key, site.as_deref()))
+                    .or_else(|| site.as_deref().filter(|_| issue_key(&issue.key)).map(|site| format!("{site}/browse/{}", issue.key)));
+            }
+        }
+        self.site_url = site;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -151,6 +171,65 @@ fn loose_text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Strin
         Value::Object(map) => map.get("name").and_then(Value::as_str).map(str::to_string),
         other => text(other),
     })
+}
+
+fn loose_url<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    Ok(match Value::deserialize(deserializer)? {
+        Value::String(text) if !text.trim().is_empty() => Some(text.trim().to_string()),
+        _ => None,
+    })
+}
+
+fn url_safe(text: &str) -> bool {
+    text.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '-' | '.' | '_' | '~'))
+}
+
+fn https_parts(url: &str) -> Option<(&str, &str)> {
+    let rest = url.strip_prefix("https://")?;
+    let (host, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    let host_ok = !host.is_empty()
+        && !host.starts_with(['.', '-'])
+        && host.contains('.')
+        && host.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
+    (host_ok && url_safe(path)).then_some((host, path))
+}
+
+pub fn site_url(raw: &str) -> Option<String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    https_parts(trimmed)?;
+    Some(trimmed.to_string())
+}
+
+fn valid_project(key: &str) -> bool {
+    key.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && key.len() <= MAX_KEY_LENGTH
+        && key.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+pub fn issue_key(key: &str) -> bool {
+    let Some((project, number)) = key.rsplit_once('-') else {
+        return false;
+    };
+    valid_project(project)
+        && !number.is_empty()
+        && number.len() <= 12
+        && number.chars().all(|c| c.is_ascii_digit())
+}
+
+pub fn jira_url(raw: &str, key: &str, site: Option<&str>) -> Option<String> {
+    let url = raw.trim();
+    let (host, path) = https_parts(url)?;
+    let tail = path.rsplit_once("/browse/")?.1;
+    let trusted = host.ends_with(".atlassian.net") || site.is_some_and(|site| url.starts_with(&format!("{site}/")));
+    (trusted && issue_key(key) && tail == key).then(|| url.to_string())
+}
+
+fn meta_site(envelope: &Value) -> Option<String> {
+    [envelope.get("meta"), envelope.get("data").and_then(|data| data.get("meta"))]
+        .into_iter()
+        .flatten()
+        .find_map(|holder| holder.get("siteUrl").and_then(Value::as_str))
+        .map(str::to_string)
 }
 
 fn invalid(message: impl Into<String>) -> Problem {
@@ -322,6 +401,10 @@ pub fn read_outcome(envelope: &Value) -> Result<CoworkerOutcome, Problem> {
         if overtime.totals.is_none() {
             overtime.totals = Some(totals_from(&overtime.months));
         }
+        if overtime.site_url.is_none() {
+            overtime.site_url = meta_site(envelope);
+        }
+        overtime.link_issues();
         return Ok(CoworkerOutcome::Ready { overtime });
     }
     let code = error_field(envelope, "code").unwrap_or_default();
@@ -345,7 +428,7 @@ pub fn read_outcome(envelope: &Value) -> Result<CoworkerOutcome, Problem> {
 pub fn read_excludes(data: &Value) -> Option<Vec<String>> {
     let list = match data {
         Value::Array(items) => items,
-        Value::Object(map) => ["excluded", "keys", "projects", "exclude"]
+        Value::Object(map) => ["excludedProjects", "excluded", "keys", "projects", "exclude"]
             .iter()
             .find_map(|field| map.get(*field).and_then(Value::as_array))?,
         _ => return None,
@@ -358,9 +441,7 @@ pub fn read_excludes(data: &Value) -> Option<Vec<String>> {
 
 pub fn project_key(key: &str) -> Result<String, Problem> {
     let key = key.trim().to_uppercase();
-    let mut chars = key.chars();
-    let starts = chars.next().is_some_and(|c| c.is_ascii_uppercase());
-    if !starts || key.len() > MAX_KEY_LENGTH || !key.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_') {
+    if !valid_project(&key) {
         return Err(invalid("La clave de proyecto de Jira va en mayúsculas, como PP."));
     }
     Ok(key)
@@ -567,6 +648,90 @@ mod tests {
         assert!(!json.to_string().contains("salary"));
     }
 
+    fn real_overtime(first_url: Value, site_url: Value) -> Value {
+        json!({
+            "schemaVersion": 1,
+            "ok": true,
+            "command": "overtime",
+            "meta": {"site": null, "siteUrl": site_url, "startField": {"id": "customfield_10015"}, "excludedProjects": ["OPS"], "queries": [], "warnings": []},
+            "data": {
+                "person": {"name": "Ana Pérez", "accountId": "acc-1", "source": "jira"},
+                "rate": {"hourlyRate": null, "monthlyHours": 160, "multiplier": 2, "currency": "MXN"},
+                "months": [{
+                    "month": "2026-09", "estimateSeconds": 28800, "expectedSeconds": 576000, "overtimeSeconds": 0, "payX1": null, "payMultiplied": null,
+                    "issues": [
+                        {"key": "PP-101", "summary": "Alta", "project": "PP", "status": "Listo", "startDate": "2026-09-03", "estimateSeconds": 28800, "url": first_url},
+                        {"key": "PP-102", "summary": "Baja", "project": "PP", "status": "Listo", "startDate": "2026-09-04", "estimateSeconds": 0, "url": "javascript:alert(1)//browse/PP-102"}
+                    ],
+                    "withoutEstimate": [{"key": "PP-103", "summary": "Sin estimar", "project": "PP", "status": "Listo", "startDate": "2026-09-10", "estimateSeconds": null, "url": null}]
+                }],
+                "totals": {"estimateSeconds": 28800, "expectedSeconds": 576000, "overtimeSeconds": 0, "payX1": null, "payMultiplied": null}
+            }
+        })
+    }
+
+    fn urls(overtime: &CoworkerOvertime) -> Vec<Option<String>> {
+        overtime.months.iter().flat_map(|month| month.issues.iter().chain(&month.without_estimate)).map(|issue| issue.url.clone()).collect()
+    }
+
+    #[test]
+    fn issue_urls_are_kept_validated_or_built_from_the_site() {
+        let envelope = real_overtime(json!("https://gruposti.atlassian.net/browse/PP-101"), json!("https://gruposti.atlassian.net/"));
+        let CoworkerOutcome::Ready { overtime } = read_outcome(&envelope).expect("ready") else {
+            panic!("expected ready");
+        };
+        assert_eq!(overtime.site_url.as_deref(), Some("https://gruposti.atlassian.net"));
+        assert_eq!(overtime.months[0].issues[0].project.as_deref(), Some("PP"));
+        assert_eq!(overtime.months[0].issues[0].status.as_deref(), Some("Listo"));
+        assert_eq!(
+            urls(&overtime),
+            vec![
+                Some("https://gruposti.atlassian.net/browse/PP-101".to_string()),
+                Some("https://gruposti.atlassian.net/browse/PP-102".to_string()),
+                Some("https://gruposti.atlassian.net/browse/PP-103".to_string()),
+            ]
+        );
+        let json = serde_json::to_value(CoworkerOutcome::Ready { overtime }).expect("json");
+        assert_eq!(json["overtime"]["months"][0]["issues"][0]["url"], "https://gruposti.atlassian.net/browse/PP-101");
+        assert_eq!(json["overtime"]["siteUrl"], "https://gruposti.atlassian.net");
+    }
+
+    #[test]
+    fn an_old_tally_without_urls_leaves_keys_as_text() {
+        let mut envelope = real_overtime(Value::Null, Value::Null);
+        envelope.as_object_mut().expect("object").remove("meta");
+        let CoworkerOutcome::Ready { overtime } = read_outcome(&envelope).expect("ready") else {
+            panic!("expected ready");
+        };
+        assert_eq!(urls(&overtime), vec![None, None, None]);
+        let hostile = real_overtime(json!("https://evil.example.com/browse/PP-101"), json!("http://gruposti.atlassian.net"));
+        let CoworkerOutcome::Ready { overtime } = read_outcome(&hostile).expect("ready") else {
+            panic!("expected ready");
+        };
+        assert_eq!(overtime.site_url, None);
+        assert_eq!(urls(&overtime), vec![None, None, None]);
+    }
+
+    #[test]
+    fn jira_urls_must_be_https_and_end_in_the_key() {
+        assert!(jira_url("https://acme.atlassian.net/browse/PP-1", "PP-1", None).is_some());
+        assert!(jira_url("https://jira.acme.com/jira/browse/OPS_2-77", "OPS_2-77", Some("https://jira.acme.com/jira")).is_some());
+        assert!(jira_url("https://jira.acme.com/jira/browse/OPS_2-77", "OPS_2-77", None).is_none());
+        assert!(jira_url("https://evil.example.com/browse/PP-1", "PP-1", Some("https://acme.atlassian.net")).is_none());
+        for bad in [
+            "http://acme.atlassian.net/browse/PP-1",
+            "https://acme.atlassian.net/browse/PP-2",
+            "https://acme.atlassian.net/browse/PP-1?x=\"<",
+            "https://acme.atlassian.net/browse/PP-1 x",
+            "https://-acme/browse/PP-1",
+            "https:///browse/PP-1",
+            "javascript:alert(1)",
+        ] {
+            assert!(jira_url(bad, "PP-1", None).is_none(), "{bad} accepted");
+        }
+        assert!(jira_url("https://acme.atlassian.net/browse/pp-1", "pp-1", None).is_none());
+    }
+
     #[test]
     fn a_result_without_salary_has_no_amounts_and_totals_are_filled() {
         let envelope = json!({
@@ -674,6 +839,10 @@ mod tests {
         assert_eq!(read_excludes(&json!(["pp", "OPS"])), Some(vec!["OPS".to_string(), "PP".to_string()]));
         assert_eq!(read_excludes(&json!({"excluded": [{"key": "PP"}, "PP"]})), Some(vec!["PP".to_string()]));
         assert_eq!(read_excludes(&json!({"added": "PP"})), None);
+        let real = json!({"ok": true, "command": "overtime exclude ls", "meta": {"path": "/x/overtime.json"}, "data": {"excludedProjects": []}});
+        assert_eq!(real.get("data").and_then(read_excludes), Some(Vec::new()));
+        let added = json!({"ok": true, "command": "overtime exclude add", "meta": {"path": "/x/overtime.json"}, "data": {"excludedProjects": ["PP", "ops"]}});
+        assert_eq!(added.get("data").and_then(read_excludes), Some(vec!["OPS".to_string(), "PP".to_string()]));
         assert_eq!(project_key(" pp ").expect("key"), "PP");
         assert!(project_key("1PP").is_err());
         assert!(project_key("-PP").is_err());

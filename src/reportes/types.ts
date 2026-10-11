@@ -208,6 +208,7 @@ export interface CoworkerIssue {
   status: string | null
   startDate: string | null
   estimateSeconds: number | null
+  url?: string | null | undefined
 }
 
 export interface CoworkerMonth {
@@ -234,6 +235,17 @@ export interface CoworkerOvertime {
   rate: CoworkerRate
   months: CoworkerMonth[]
   totals: CoworkerTotals
+  siteUrl?: string | null | undefined
+}
+
+export interface CoworkerExportInclude {
+  pay: boolean
+  withoutEstimate: boolean
+}
+
+export interface CoworkerExportReport extends CoworkerOvertime {
+  fromMonth: string
+  toMonth: string
 }
 
 export interface CoworkerCandidate {
@@ -267,4 +279,17 @@ export function removeOvertimeExclude(key: string): Promise<string[]> {
 
 export function fetchJiraSites(): Promise<JiraSiteOption[]> {
   return invoke<JiraSiteOption[]>('atlassian_sites', { check: false })
+}
+
+export function exportCoworkerReport(
+  format: FileFormat,
+  report: CoworkerExportReport,
+  include: CoworkerExportInclude,
+  fileName: string,
+): Promise<string> {
+  return invoke<string>('export_coworker_report', { format, report, include, fileName })
+}
+
+export function openJiraUrl(url: string): Promise<void> {
+  return invoke<void>('open_external', { url })
 }
