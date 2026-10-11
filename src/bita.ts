@@ -206,6 +206,94 @@ export function pending(): Promise<SummaryView> {
   return invoke<SummaryView>('pending')
 }
 
+export interface ReportRange {
+  fromDay: string
+  toDay: string
+  timezone: string | null
+  weekStartsOn: number | string | null
+}
+
+export interface ReportProject {
+  projectId: number | null
+  name: string
+  clientName: string | null
+  totalSeconds: number
+  entryCount: number
+  color: string
+  jira: boolean
+  registeredSeconds: number
+  pendingSeconds: number
+}
+
+export interface ProjectSeconds {
+  projectId: number | null
+  seconds: number
+}
+
+export interface ReportDay {
+  day: string
+  totalSeconds: number
+  projects: ProjectSeconds[]
+}
+
+export interface ReportWeek {
+  fromDay: string
+  toDay: string
+  totalSeconds: number
+  projects: ProjectSeconds[]
+}
+
+export interface ReportEntry {
+  id: number
+  title: string
+  projectId: number | null
+  start: string
+  stop: string | null
+  localDay: string
+  seconds: number
+  kind: string | null
+  overlapping: boolean
+  color: string
+  registered: boolean | null
+  issueKey: string | null
+  jira: boolean | null
+  excludedReason: string | null
+}
+
+export interface JiraTotals {
+  registeredSeconds: number
+  pendingSeconds: number
+  excludedSeconds: number
+  nonJiraSeconds: number
+}
+
+export interface ReportView {
+  range: ReportRange
+  totalSeconds: number
+  entryCount: number
+  activeDays: number
+  projects: ReportProject[]
+  days: ReportDay[]
+  weeks: ReportWeek[]
+  overlaps: Overlap[]
+  entries: ReportEntry[] | null
+  jiraAvailable: boolean
+  jiraTotals: JiraTotals | null
+  jiraProblem: string | null
+}
+
+export interface ReportRequest {
+  preset?: string
+  from?: string
+  to?: string
+  projectId?: number
+  entries?: boolean
+}
+
+export function report(request: ReportRequest = {}): Promise<ReportView> {
+  return invoke<ReportView>('report', { ...request })
+}
+
 export function scopes(): Promise<Scope[]> {
   return invoke<Scope[]>('scopes')
 }

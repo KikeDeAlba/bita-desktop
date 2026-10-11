@@ -370,3 +370,94 @@ fn tally_reports_the_pending_time_in_the_summary_shape() {
         );
     }
 }
+
+const REPORT_FROM: &str = "2026-01-05";
+const REPORT_TO: &str = "2026-01-11";
+
+fn lacks_command(envelope: &serde_json::Value) -> bool {
+    let code = envelope["error"]["code"].as_str();
+    let message = envelope["error"]["message"].as_str().unwrap_or_default().to_lowercase();
+    code == Some("UNKNOWN_COMMAND") || (code == Some("USAGE_ERROR") && message.starts_with("unknown command"))
+}
+
+fn log_a_past_block(sandbox: &Sandbox) {
+    assert_eq!(sandbox.run("bita", &["project", "add", "Contrato"])["ok"].as_bool(), Some(true));
+    let logged = sandbox.run(
+        "bita",
+        &["log", "Rotar el secreto", "--project", "Contrato", "--from", "2026-01-06T10:00", "--for", "30m"],
+    );
+    assert_eq!(logged["ok"].as_bool(), Some(true), "{logged}");
+}
+
+#[test]
+fn bita_reports_the_time_per_project_the_reports_window_draws() {
+    let Some(sandbox) = Sandbox::new(&["bita"], "report") else { return };
+    if lacks_command(&sandbox.run("bita", &["report", "today"])) {
+        eprintln!("skipped: this bita has no report command");
+        return;
+    }
+    log_a_past_block(&sandbox);
+
+    let report = sandbox.run("bita", &["report", "--from", REPORT_FROM, "--to", REPORT_TO, "--entries"]);
+    assert_eq!(report["schemaVersion"].as_u64(), Some(EXPECTED_SCHEMA));
+    assert_eq!(report["ok"].as_bool(), Some(true), "{report}");
+    let data = &report["data"];
+    has_fields(
+        data,
+        &["range", "totalSeconds", "entryCount", "activeDays", "projects", "days", "weeks", "overlaps", "entries"],
+        "report",
+    );
+    has_fields(&data["range"], &["fromDay", "toDay", "timezone", "weekStartsOn"], "report range");
+    let projects = data["projects"].as_array().expect("projects");
+    assert!(!projects.is_empty(), "{report}");
+    for project in projects {
+        has_fields(project, &["projectId", "name", "clientName", "totalSeconds", "entryCount"], "report projects");
+    }
+    let days = data["days"].as_array().expect("days");
+    assert!(!days.is_empty(), "{report}");
+    for day in days {
+        has_fields(day, &["day", "totalSeconds", "projects"], "report days");
+    }
+    for week in data["weeks"].as_array().expect("weeks") {
+        has_fields(week, &["fromDay", "toDay", "totalSeconds", "projects"], "report weeks");
+    }
+    for entry in data["entries"].as_array().expect("entries") {
+        has_fields(
+            entry,
+            &["id", "title", "projectId", "start", "stop", "localDay", "seconds", "kind", "overlapping"],
+            "report entries",
+        );
+    }
+}
+
+#[test]
+fn tally_reports_the_jira_status_the_reports_window_merges() {
+    let Some(sandbox) = Sandbox::new(&["bita", "tally"], "status") else { return };
+    if lacks_command(&sandbox.run("tally", &["status", "today"])) {
+        eprintln!("skipped: this tally has no status command");
+        return;
+    }
+    log_a_past_block(&sandbox);
+
+    let status = sandbox.run("tally", &["status", "--from", REPORT_FROM, "--to", REPORT_TO, "--entries"]);
+    assert_eq!(status["ok"].as_bool(), Some(true), "{status}");
+    let data = &status["data"];
+    has_fields(data, &["projects", "totals", "entries"], "tally status");
+    has_fields(
+        &data["totals"],
+        &["registeredSeconds", "pendingSeconds", "excludedSeconds", "nonJiraSeconds"],
+        "tally status totals",
+    );
+    let projects = data["projects"].as_array().expect("projects");
+    assert!(!projects.is_empty(), "{status}");
+    for project in projects {
+        has_fields(
+            project,
+            &["projectId", "name", "jira", "registeredSeconds", "pendingSeconds", "excludedSeconds", "nonJiraSeconds"],
+            "tally status projects",
+        );
+    }
+    for entry in data["entries"].as_array().expect("entries") {
+        has_fields(entry, &["entryId", "registered", "issueKey", "jira", "excludedReason"], "tally status entries");
+    }
+}
